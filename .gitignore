@@ -1,0 +1,111 @@
+# ============================================================
+# DEPENDENCIES
+# ============================================================
+node_modules/
+.pnp
+.pnp.js
+
+# ============================================================
+# BUILD OUTPUT
+# ============================================================
+dist/
+build/
+dist-ssr/
+*.local
+
+# ============================================================
+# ENVIRONMENT & SECRETS - NEVER COMMIT THESE
+# ============================================================
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+*.env
+
+# Firebase service account credentials
+firebase-credentials.json
+*firebase*.json
+google-services.json
+service-account*.json
+
+# ============================================================
+# PYTHON
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env/
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Pytest
+.pytest_cache/
+.cache/
+
+# mypy
+.mypy_cache/
+
+# ============================================================
+# DOCKER
+# ============================================================
+# Keep Dockerfiles but ignore runtime artifacts
+
+# ============================================================
+# VAULT & STORAGE
+# ============================================================
+backend/vault_local/
+vault_local/
+
+# ============================================================
+# LOGS
+# ============================================================
+*.log
+error_trace.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ============================================================
+# EDITORS
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# TYPESCRIPT
+# ============================================================
+*.tsbuildinfo
+
+# ============================================================
+# TESTING
+# ============================================================
+coverage/
+.nyc_output/
