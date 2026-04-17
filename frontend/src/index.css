@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* Fundo suave que não queima a retina após 6 horas de uso */
+    @apply bg-workspace-50 text-workspace-800 font-sans antialiased;
+  }
+
+  /* Elegância na seleção de textos pelo usuário */
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+}
+
+@layer utilities {
+  /* 
+    Premium Scrollbar para os documentos densos no Viewer.
+    Não usamos o default grosseiro do Windows.
+  */
+  .scrollbar-premium::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-premium::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  
+  .scrollbar-premium::-webkit-scrollbar-thumb {
+    @apply bg-workspace-300 rounded-full transition-colors duration-200;
+  }
+  
+  .scrollbar-premium::-webkit-scrollbar-thumb:hover {
+    @apply bg-workspace-400;
+  }
+
+  /* Utilitário para ocultar scrollbars nativas mas manter a funcionalidade de sroll */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
