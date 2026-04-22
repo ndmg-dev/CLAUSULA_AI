@@ -1,24 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Plus, Sparkles } from 'lucide-react';
 import { applySuggestion, getContractText } from '../services/wordInterface';
-
-export type Message = {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  isStreaming?: boolean;
-};
+import { useChatStore, type Message } from '../store/useChatStore';
 
 const SYSTEM_PROMPT = `Você é o Cláusula AI, um Analista Societário Sênior especialista em direito empresarial brasileiro, regras do DREI, Junta Comercial e enquadramento CNAE. Suas respostas devem ser diretas, técnicas e formatadas prontas para uso em contratos sociais. Evite jargões desnecessários, foque na aprovação do registro e na proteção patrimonial dos sócios.`;
 
 export function CopilotChat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: 'Olá! Sou o Cláusula AI. Como posso ajudar com o seu contrato societário hoje?',
-    }
-  ]);
+  const { messages, addMessage, updateMessage, setMessages } = useChatStore();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -42,21 +30,18 @@ export function CopilotChat() {
       content: input.trim(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
     setInput('');
     setIsLoading(true);
 
     // Adiciona o placeholder da mensagem da IA, marcado como streaming
     const aiMessageId = (Date.now() + 1).toString();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: aiMessageId,
-        role: 'assistant',
-        content: '',
-        isStreaming: true,
-      },
-    ]);
+    addMessage({
+      id: aiMessageId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+    });
 
     try {
       // Captura o texto atual do documento Word para dar "visão" à IA
@@ -105,33 +90,18 @@ export function CopilotChat() {
         // Assumindo texto puro ou texto já decodificado na stream de bytes do backend:
         aiResponseText += chunk;
 
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === aiMessageId
-              ? { ...msg, content: aiResponseText }
-              : msg
-          )
-        );
+        updateMessage(aiMessageId, { content: aiResponseText });
       }
 
       // Stream finalizada com sucesso
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === aiMessageId
-            ? { ...msg, isStreaming: false }
-            : msg
-        )
-      );
+      updateMessage(aiMessageId, { isStreaming: false });
 
     } catch (error) {
       console.error('[CopilotChat] Erro na requisição:', error);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === aiMessageId
-            ? { ...msg, content: 'Desculpe, ocorreu um erro ao se comunicar com o motor da IA.', isStreaming: false }
-            : msg
-        )
-      );
+      updateMessage(aiMessageId, { 
+        content: 'Desculpe, ocorreu um erro ao se comunicar com o motor da IA.', 
+        isStreaming: false 
+      });
     } finally {
       setIsLoading(false);
     }
