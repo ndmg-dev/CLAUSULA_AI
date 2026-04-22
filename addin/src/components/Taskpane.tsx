@@ -10,6 +10,7 @@ import { getContractText, applySuggestion, highlightClause, focusClause, insertC
 import axios from 'axios';
 import { TemplatesTab } from './TemplatesTab';
 import { EsignTab } from './EsignTab';
+import { CopilotChat } from './CopilotChat';
 
 // ================================================================
 // MAPA DE CATEGORIAS -> ÍCONE + LABEL CONTÁBIL
@@ -223,7 +224,7 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
 // COMPONENTE PRINCIPAL: TASKPANE
 // ================================================================
 export function Taskpane() {
-  const [activeTab, setActiveTab] = useState<'auditor' | 'templates' | 'esign'>('auditor');
+  const [activeTab, setActiveTab] = useState<'auditor' | 'templates' | 'esign' | 'chat'>('auditor');
   const [cloudSaving, setCloudSaving] = useState(false);
   const [cloudSaved, setCloudSaved] = useState(false);
   const { isAuditing, result, error, setAuditing, setResult, setError, reset } = useAuditStore();
@@ -418,6 +419,10 @@ export function Taskpane() {
         <main className="flex-1 overflow-y-auto scrollbar-slim pb-20">
           <TemplatesTab />
         </main>
+      ) : activeTab === 'chat' ? (
+        <main className="flex-1 overflow-y-auto scrollbar-slim pb-20">
+          <CopilotChat />
+        </main>
       ) : (
         <main className="flex-1 overflow-y-auto scrollbar-slim pb-20">
           <EsignTab />
@@ -446,6 +451,13 @@ export function Taskpane() {
         >
           <PenTool className="w-5 h-5" />
           <span className="text-[10px] font-bold uppercase tracking-wider">E-Sign</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('chat')}
+          className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'chat' ? 'text-teal-600' : 'text-workspace-400 hover:text-workspace-600'}`}
+        >
+          <MessageSquare className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Copiloto</span>
         </button>
       </footer>
     </div>
