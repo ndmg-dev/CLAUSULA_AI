@@ -11,13 +11,13 @@
   <DefaultLocale>pt-BR</DefaultLocale>
   <DisplayName DefaultValue="Cláusula AI — Auditoria"/>
   <Description DefaultValue="Copiloto IA para auditoria de contratos societários."/>
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://localhost:3000/support"/>
+  <IconUrl DefaultValue="https://addin.clausulaai.nucleodigital.cloud/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://addin.clausulaai.nucleodigital.cloud/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://addin.clausulaai.nucleodigital.cloud/support"/>
   
   <AppDomains>
-    <AppDomain>https://localhost:3000</AppDomain>
-    <AppDomain>https://localhost:8000</AppDomain>
+    <AppDomain>https://addin.clausulaai.nucleodigital.cloud</AppDomain>
+    <AppDomain>https://api.clausulaai.nucleodigital.cloud</AppDomain>
   </AppDomains>
 
   <Hosts>
@@ -31,7 +31,7 @@
   </Requirements>
 
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:3000/"/>
+    <SourceLocation DefaultValue="https://addin.clausulaai.nucleodigital.cloud/"/>
   </DefaultSettings>
 
   <Permissions>ReadWriteDocument</Permissions>
@@ -77,12 +77,12 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://addin.clausulaai.nucleodigital.cloud/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://addin.clausulaai.nucleodigital.cloud/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://addin.clausulaai.nucleodigital.cloud/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://addin.clausulaai.nucleodigital.cloud/"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="ClausulaAI.TabLabel" DefaultValue="Cláusula AI"/>
