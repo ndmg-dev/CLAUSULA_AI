@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Plus, Sparkles } from 'lucide-react';
-import { applySuggestion } from '../services/wordInterface';
+import { applySuggestion, getContractText } from '../services/wordInterface';
 
 export type Message = {
   id: string;
@@ -59,22 +59,27 @@ export function CopilotChat() {
     ]);
 
     try {
+      // Captura o texto atual do documento Word para dar "visão" à IA
+      const docText = await getContractText();
+
       // Monta o payload com o histórico, inserindo o System Prompt no início
       const conversationHistory = [
         { role: 'system', content: SYSTEM_PROMPT },
         ...messages.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: userMessage.content }
-      ].filter(m => m.role !== 'system' || m.content === SYSTEM_PROMPT); // Mantém apenas os válidos
+      ].filter(m => m.role !== 'system' || m.content === SYSTEM_PROMPT);
 
-      // Chamada para a API (ajuste a URL conforme seu backend real de streaming)
+      // Chamada para a API
       const baseUrl = import.meta.env.VITE_API_URL || 'https://api.clausulaai.nucleodigital.cloud';
       const response = await fetch(`${baseUrl}/api/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Se tiver auth, adicione o token aqui: 'Authorization': 'Bearer ...'
         },
-        body: JSON.stringify({ messages: conversationHistory }),
+        body: JSON.stringify({ 
+          messages: conversationHistory,
+          document_context: docText // Injeção de contexto dinâmico
+        }),
       });
 
       if (!response.ok) {
