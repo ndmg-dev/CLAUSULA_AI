@@ -8,6 +8,8 @@ COPY addin/package.json addin/package-lock.json* ./
 RUN npm ci
 
 COPY addin/ .
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # Estágio 2: Produção (Nginx)

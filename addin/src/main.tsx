@@ -1,7 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import axios from 'axios';
 import { Taskpane } from './components/Taskpane';
 import './index.css';
+
+// Configura o endpoint do backend com fallback para o link de produção atual
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'https://api.clausulaai.nucleodigital.cloud';
 
 /**
  * Entry Point do Word Add-in.
