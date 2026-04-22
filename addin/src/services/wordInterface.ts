@@ -106,7 +106,7 @@ export async function replaceClauseIntelligently(searchText: string, newText: st
     }
     
     return false;
-  }).catch((e) => {
+  }).catch((e: any) => {
     console.error('[wordInterface] Erro ao substituir a cláusula inteligentemente', e);
     return false;
   });
@@ -163,7 +163,7 @@ export async function insertNewClauseAtPosition(clauseTitle: string, clauseBody:
     await context.sync();
     console.log(`[wordInterface] Nova cláusula inserida: "${clauseTitle}" (${clauseBody.length} chars)`);
     return true;
-  }).catch((e) => {
+  }).catch((e: any) => {
     console.error('[wordInterface] Erro ao inserir nova cláusula', e);
     return false;
   });
@@ -281,7 +281,7 @@ export async function insertCommentToClause(searchText: string, commentText: str
       return true;
     }
     return false;
-  }).catch((e) => {
+  }).catch((e: any) => {
     console.error('[wordInterface] Erro ao inserir comentário nativo', e);
     return false;
   });
