@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Plus, Sparkles } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { applySuggestion, getContractText } from '../services/wordInterface';
 import { useChatStore, type Message } from '../store/useChatStore';
 
@@ -147,12 +149,23 @@ export function CopilotChat() {
                     ? 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm' 
                     : 'bg-brand-600 text-white rounded-2xl rounded-tr-sm'
                 }`}>
-                  <span className="whitespace-pre-wrap">
-                    {msg.content}
+                  <div className="prose prose-slate prose-xs max-w-none">
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
+                        li: ({ children }) => <li className="mb-0">{children}</li>,
+                        strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
                     {msg.isStreaming && (
                       <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-brand-500 align-middle animate-pulse" />
                     )}
-                  </span>
+                  </div>
                 </div>
 
                 {/* Botão de Inserir no Word (Aparece apenas para IA e após terminar o streaming) */}
