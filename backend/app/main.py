@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
-from app.api.endpoints import analyze, export, rewrite, export_word, vault, esign
+from app.api.endpoints import analyze, export, rewrite, export_word, vault, esign, chat
 
 # ---------------------------------------------------------
 # C L Á U S U L A   A I   -   C O R E   E N T R Y P O I N T
@@ -57,6 +57,7 @@ app.include_router(export_word.router, prefix="/api/export", tags=["Export Word"
 app.include_router(rewrite.router, prefix="/api/rewrite", tags=["Clause Rewrite"])
 app.include_router(vault.router, prefix="/api/vault", tags=["Cloud Vault"])
 app.include_router(esign.router, prefix="/api/esign", tags=["E-Signature (ZapSign)"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Copilot Chat"])
 
 # Monta diretório local de arquivos do cofre para download (fallback sem Firebase Storage)
 vault_dir = os.path.join(os.getcwd(), "vault_local")
