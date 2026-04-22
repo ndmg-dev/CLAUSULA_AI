@@ -1,0 +1,29 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        # Pega a variável injetada pelo Coolify e passa para o build do Vite
+        - VITE_API_URL=${VITE_API_URL:-https://api.clausula.ai}
+    # Coolify detectará a porta 80 automaticamente
+    restart: always
+
+  addin:
+    build:
+      context: .
+      dockerfile: addin/Dockerfile.prod
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=production
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://app.clausula.ai,https://addin.clausula.ai}
+      # Demais variáveis (OPENAI_API_KEY, FIREBASE, etc.) devem ser configuradas na UI do Coolify
+    # Em produção, usar gunicorn com uvicorn workers (removendo o --reload)
+    command: >
+      bash -c "gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --timeout 120"
+    restart: always
