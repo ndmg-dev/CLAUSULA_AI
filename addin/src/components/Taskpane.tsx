@@ -275,7 +275,7 @@ export function Taskpane() {
             setCloudSaving(true);
             try {
               await new Promise<void>((resolve, reject) => {
-                Office.context.document.saveAsync((result: any) => {
+                (Office.context.document as any).saveAsync((result: any) => {
                   if (result.status === Office.AsyncResultStatus.Succeeded) {
                     resolve();
                   } else {
