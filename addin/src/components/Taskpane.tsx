@@ -283,8 +283,9 @@ export function Taskpane() {
                 
                 setCloudSaved(true);
                 setTimeout(() => setCloudSaved(false), 4000);
-              } catch(e) {
-                console.error(e);
+              } catch(e: any) {
+                console.error('[Vault] Erro ao salvar:', e);
+                alert(`Falha ao salvar no cofre: ${e?.response?.data?.detail || e?.message || 'Erro de conexão'}`);
               } finally {
                 setCloudSaving(false);
               }

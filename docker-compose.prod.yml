@@ -23,7 +23,8 @@ services:
       dockerfile: Dockerfile
     environment:
       - ENVIRONMENT=production
-      - CORS_ORIGINS=${CORS_ORIGINS:-https://app.clausula.ai,https://addin.clausula.ai}
+      - BYPASS_AUTH=true
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://addin.clausulaai.nucleodigital.cloud,https://clausulaai.nucleodigital.cloud}
       # Demais variáveis (OPENAI_API_KEY, FIREBASE, etc.) devem ser configuradas na UI do Coolify
     # Em produção, usar gunicorn com uvicorn workers (removendo o --reload)
     command: >
