@@ -269,38 +269,39 @@ export function Taskpane() {
           </div>
         </div>
 
-        {/* CLOUD BUTTON HEADER */}
-        {(result || activeTab === 'templates') && (
-          <button
-            onClick={async () => {
-              setCloudSaving(true);
-              try {
-                const base64Str = await getWordDocumentAsBase64();
-                await axios.post('/api/vault/upload', {
-                  filename: "contrato_auditoria.docx",
-                  file_base64: base64Str
+        {/* CLOUD SYNC BUTTON — Salva o documento no OneDrive/SharePoint */}
+        <button
+          onClick={async () => {
+            setCloudSaving(true);
+            try {
+              await new Promise<void>((resolve, reject) => {
+                Office.context.document.saveAsync((result: any) => {
+                  if (result.status === Office.AsyncResultStatus.Succeeded) {
+                    resolve();
+                  } else {
+                    reject(new Error(result.error?.message || 'Falha ao salvar'));
+                  }
                 });
-                
-                setCloudSaved(true);
-                setTimeout(() => setCloudSaved(false), 4000);
-              } catch(e: any) {
-                console.error('[Vault] Erro ao salvar:', e);
-                alert(`Falha ao salvar no cofre: ${e?.response?.data?.detail || e?.message || 'Erro de conexão'}`);
-              } finally {
-                setCloudSaving(false);
-              }
-            }}
-            disabled={cloudSaving || cloudSaved}
-            title="Salvar versão atual no Cofre Cloud"
-            className={`p-1.5 rounded-md transition-colors border ${
-              cloudSaved 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-brand-600 shadow-sm'
-            }`}
-          >
-            {cloudSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : cloudSaved ? <CheckCircle2 className="w-4 h-4" /> : <CloudUpload className="w-4 h-4" />}
-          </button>
-        )}
+              });
+              setCloudSaved(true);
+              setTimeout(() => setCloudSaved(false), 3000);
+            } catch (e: any) {
+              console.error('[CloudSync] Erro:', e);
+              alert('Salve o documento no OneDrive primeiro (Arquivo > Salvar Como > OneDrive) para ativar a sincronização na nuvem.');
+            } finally {
+              setCloudSaving(false);
+            }
+          }}
+          disabled={cloudSaving || cloudSaved}
+          title="Salvar e sincronizar com OneDrive"
+          className={`p-1.5 rounded-md transition-colors border ${
+            cloudSaved 
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-brand-600 shadow-sm'
+          }`}
+        >
+          {cloudSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : cloudSaved ? <CheckCircle2 className="w-4 h-4" /> : <CloudUpload className="w-4 h-4" />}
+        </button>
       </header>
 
       {/* ==================== CONTEÚDO DA ABA ==================== */}
