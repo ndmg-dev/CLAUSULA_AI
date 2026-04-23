@@ -274,20 +274,15 @@ export function Taskpane() {
           onClick={async () => {
             setCloudSaving(true);
             try {
-              await new Promise<void>((resolve, reject) => {
-                (Office.context.document as any).saveAsync((result: any) => {
-                  if (result.status === Office.AsyncResultStatus.Succeeded) {
-                    resolve();
-                  } else {
-                    reject(new Error(result.error?.message || 'Falha ao salvar'));
-                  }
-                });
+              await Word.run(async (context: any) => {
+                context.document.save();
+                await context.sync();
               });
               setCloudSaved(true);
               setTimeout(() => setCloudSaved(false), 3000);
             } catch (e: any) {
               console.error('[CloudSync] Erro:', e);
-              alert('Salve o documento no OneDrive primeiro (Arquivo > Salvar Como > OneDrive) para ativar a sincronização na nuvem.');
+              alert('Para sincronizar na nuvem, salve o documento no OneDrive primeiro (Arquivo > Salvar Como > OneDrive).');
             } finally {
               setCloudSaving(false);
             }
