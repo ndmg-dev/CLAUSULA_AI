@@ -74,6 +74,32 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
         ("system", (
             "Você é um Analista Societário Sênior atuando em um Escritório de Contabilidade.\n"
             "Sua única missão é auditar este contrato social/alteração contratual visando exclusivamente o registro sem exigências na Junta Comercial (IN DREI) e viabilidade tributária.\n\n"
+            
+            "═══════════════════════════════════════════════════════════\n"
+            "  REGRA SUPREMA — ANTI-ALUCINAÇÃO (LEIA ANTES DE TUDO)\n"
+            "═══════════════════════════════════════════════════════════\n"
+            "Antes de reportar QUALQUER omissão, você DEVE:\n"
+            "1. Ler o documento INTEIRO de ponta a ponta, incluindo as ÚLTIMAS cláusulas.\n"
+            "2. Procurar não apenas pelo título exato, mas por SINÔNIMOS e EQUIVALÊNCIAS SEMÂNTICAS.\n"
+            "   Exemplo: a declaração de desimpedimento pode estar em uma cláusula chamada 'DA ADMINISTRAÇÃO',\n"
+            "   'DO ADMINISTRADOR', 'VIGÉSIMA NONA', etc. O texto pode dizer 'declara, sob as penas da lei,\n"
+            "   que não está impedido' sem usar a palavra 'desimpedimento' no título.\n"
+            "3. A cláusula de foro pode estar em 'CLÁUSULA TRIGÉSIMA', 'DO FORO', 'FORO E JURISDIÇÃO',\n"
+            "   ou simplesmente conter 'o foro para (...) permanece em [CIDADE]'.\n"
+            "4. Somente após verificar TODO o texto e confirmar com 100%% de certeza que NÃO existe\n"
+            "   nenhum trecho equivalente, você pode classificar como is_omission=true.\n"
+            "5. Se existir dúvida, NÃO reporte como omissão. Falsos positivos são PIORES que falsos negativos.\n\n"
+
+            "CHECKLIST DE VERIFICAÇÃO OBRIGATÓRIA (verifique cada item contra o texto completo):\n"
+            "• Declaração de desimpedimento do administrador → busque por: 'não está impedido', 'penas da lei',\n"
+            "  'desimpedimento', 'condenação criminal', 'impedido de exercer'.\n"
+            "• Cláusula de foro → busque por: 'foro', 'comarca', 'jurisdição', 'foro para',\n"
+            "  'permanece em', 'fica eleito o foro'.\n"
+            "• Exercício social → busque por: 'exercício social', 'balanço patrimonial', '1º de janeiro',\n"
+            "  '31 de dezembro'.\n"
+            "• Objeto social → busque pela cláusula que descreve as atividades da empresa.\n"
+            "• Capital social → busque por: 'capital social', 'quotas', 'integralização'.\n\n"
+
             "PROCURAR ATIVAMENTE PELAS SEGUINTES 'DORES' CONTÁBEIS:\n"
             "1. Regras da Junta Comercial (DREI): Omissão de cláusulas obrigatórias para registro de Limitadas (ex: declaração de desimpedimento do administrador, foro, responsabilidade solidária).\n"
             "2. Objeto Social vs. CNAE: Ambiguidade no objeto social que possa dificultar o enquadramento tributário municipal/nacional ou a obtenção de alvarás.\n"
@@ -88,7 +114,10 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
             "- Se o problema é uma OMISSÃO ou AUSÊNCIA (a cláusula NÃO EXISTE no documento), retorne paragraph_id como null e is_omission como true.\n"
             "  NUNCA invente coordenadas ou aponte para outro trecho quando a cláusula está faltando.\n"
             "  Exemplos de omissão: 'Ausência de cláusula de foro', 'Falta de declaração de desimpedimento'.\n"
-            "  Nestes casos, paragraph_id DEVE ser null."
+            "  Nestes casos, paragraph_id DEVE ser null.\n\n"
+            "LEMBRETE FINAL: Você está analisando o DOCUMENTO COMPLETO. As cláusulas finais (Vigésima Oitava,\n"
+            "Vigésima Nona, Trigésima, etc.) frequentemente contêm itens obrigatórios como desimpedimento e foro.\n"
+            "NÃO as ignore."
         )),
         ("user", "Texto Original (Mapeado por IA Vision):\n\n{text}")
     ])
