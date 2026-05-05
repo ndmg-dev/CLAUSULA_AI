@@ -1,4 +1,6 @@
 import logging
+import json
+import re
 from typing import Dict, TypedDict, List, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
@@ -9,26 +11,28 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# ================================================================
+# SCHEMA UNIFICADO: Issues + Summary em UMA única resposta
+# ================================================================
 class UnclassifiedIssue(BaseModel):
-    title: str = Field(description="Título curto da anomalia jurídica.")
-    description: str = Field(description="Descrição técnica.")
-    severity: str = Field(description="Classificação de gravidade: 'Critical' para riscos de alta monta financeira, compliance ou registro na Junta; 'Mild' para inconsistências menores.")
-    clause_reference: str = Field(description="A qual cláusula ou seção isso se refere.")
-    paragraph_id: Optional[str] = Field(default=None, description="O ID exato do parágrafo onde a falha reside (ex: 'P12'). DEVE ser null/None se o problema for uma OMISSÃO ou AUSÊNCIA de cláusula — nunca invente coordenadas para algo que não existe no texto.")
-    is_omission: bool = Field(default=False, description="True se o problema é a AUSÊNCIA/OMISSÃO de uma cláusula que deveria existir. False se o problema está em um texto que realmente existe no documento.")
-    category: str = Field(description="Obrigatório usar UMA dessas 6 literais exatas: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
-    suggested_fix: Optional[str] = Field(default=None, description="Texto COMPLETO sugerido pela IA para inserir ou substituir no documento original. Forneça o texto limpo, pronto para ser copiado-e-colado. Traga o texto da cláusula inteira.")
+    title: str = Field(description="Título curto da anomalia.")
+    description: str = Field(description="Descrição técnica concisa.")
+    severity: str = Field(description="'Critical' ou 'Mild'.")
+    clause_reference: str = Field(description="Referência à cláusula (ex: 'Cláusula Oitava').")
+    paragraph_id: Optional[str] = Field(default=None, description="ID exato do parágrafo (ex: 'P12'). DEVE ser null se for omissão.")
+    is_omission: bool = Field(default=False, description="True se a cláusula NÃO EXISTE no documento.")
+    category: str = Field(description="Literal: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
+    suggested_fix: Optional[str] = Field(default=None, description="Texto sugerido para correção (máx 500 chars).")
 
-class RawIssuesExtraction(BaseModel):
-    issues: List[UnclassifiedIssue]
-
-class SummaryGeneration(BaseModel):
-    summary: AnalysisSummary
+class FullAnalysisResult(BaseModel):
+    """Resposta unificada: issues + summary em uma única chamada LLM."""
+    executive_summary: str = Field(description="Parecer narrativo em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre parágrafos.")
+    risk_level: str = Field(description="'Low', 'Medium' ou 'High'.")
+    issues: List[UnclassifiedIssue] = Field(description="Lista de problemas encontrados (máximo 25).")
 
 class WorkflowState(TypedDict):
-    """Estado do Graph inclui agora a base de navegação de contexto para acoplar os highlights (BBoxes) interceptados."""
     document_context: dict 
-    cleaned_text: str       # Texto limpo pela Lavanderia IA (sem ruídos de OCR)
+    cleaned_text: str
     raw_issues: List[UnclassifiedIssue]
     issues: List[Issue]
     summary: AnalysisSummary
@@ -36,149 +40,135 @@ class WorkflowState(TypedDict):
     final_result: AnalysisResult
 
 
+def _smart_truncate(text: str, max_chars: int = 120000) -> str:
+    """Truncamento inteligente que preserva início + fim do documento.
+    Cláusulas obrigatórias (foro, desimpedimento) ficam nas últimas páginas."""
+    if len(text) <= max_chars:
+        return text
+    head_size = int(max_chars * 0.80)
+    tail_size = max_chars - head_size
+    result = (
+        text[:head_size] + 
+        "\n\n[... SEÇÃO INTERMEDIÁRIA OMITIDA POR LIMITE ...]\n\n" + 
+        text[-tail_size:]
+    )
+    logger.warning(
+        f"Texto truncado: {len(text)} → ~{max_chars} chars "
+        f"(head={head_size}, tail={tail_size})"
+    )
+    return result
 
-def clean_text_node(state: WorkflowState) -> WorkflowState:
-    """Lavanderia de Texto: remove ruídos de OCR, marcadores [ID: PX], numeração de página
-    e reorganiza o conteúdo em parágrafos fluidos prontos para edição."""
-    raw_text = state["document_context"].get("clean_text_for_llm", "")
+
+# ================================================================
+# NÓ ÚNICO DE ANÁLISE (substitui CleanText + DetectIssues + Summary)
+# ================================================================
+def unified_analysis_node(state: WorkflowState) -> WorkflowState:
+    """Análise UNIFICADA em uma ÚNICA chamada LLM.
+    Detecta issues, classifica e gera resumo executivo — tudo de uma vez.
+    Elimina 2 chamadas LLM extras, cortando o tempo pela metade."""
     
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", (
-            "Você é um formatador profissional de documentos jurídicos.\n"
-            "Receba o texto bruto extraído por OCR de um contrato e devolva APENAS o conteúdo textual puro do contrato.\n\n"
-            "REGRAS OBRIGATÓRIAS:\n"
-            "1. Remova TODOS os metadados de escaneamento: marcadores [ID: P0], [ID: P1], etc.\n"
-            "2. Remova números de página isolados, cabeçalhos repetidos, rodapés e marcas d'água.\n"
-            "3. Corrija quebras de linha artificiais — unifique linhas que formam o mesmo parágrafo.\n"
-            "4. Mantenha a hierarquia de Cláusulas (ex: 'CLÁUSULA PRIMEIRA', 'CLÁUSULA SEGUNDA').\n"
-            "5. Retorne SOMENTE o texto limpo, sem explicações, sem prefixos, sem marcadores adicionais."
-        )),
-        ("user", "Texto bruto do OCR:\n\n{raw_text}")
-    ])
-    
-    try:
-        llm = get_llm(task="clean")
-        response = llm.invoke(prompt.format_messages(raw_text=raw_text[:80000]))
-        cleaned = response.content.strip()
-        logger.info(f"CleanTextNode: texto limpo com {len(cleaned)} chars (original: {len(raw_text)} chars)")
-        return {"cleaned_text": cleaned}
-    except Exception as e:
-        logger.error(f"CleanTextNode falhou, usando texto original: {e}")
-        return {"cleaned_text": raw_text}
-
-
-def detect_issues_node(state: WorkflowState) -> WorkflowState:
-    """Detecta E classifica issues em uma única chamada LLM para garantir consistência de índices."""
-    text = state["document_context"]["clean_text_for_llm"]  # Usa o texto COM os [ID: PX] para mapeamento
+    text = state["document_context"]["clean_text_for_llm"]
+    text_for_llm = _smart_truncate(text)
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", (
             "Você é um Analista Societário Sênior atuando em um Escritório de Contabilidade.\n"
-            "Sua única missão é auditar este contrato social/alteração contratual visando exclusivamente o registro sem exigências na Junta Comercial (IN DREI) e viabilidade tributária.\n\n"
+            "Sua missão é auditar este contrato social/alteração contratual e produzir um parecer completo.\n\n"
             
             "═══════════════════════════════════════════════════════════\n"
             "  REGRA SUPREMA — ANTI-ALUCINAÇÃO (LEIA ANTES DE TUDO)\n"
             "═══════════════════════════════════════════════════════════\n"
-            "Antes de reportar QUALQUER omissão, você DEVE:\n"
+            "ANTES de reportar QUALQUER omissão, você DEVE:\n"
             "1. Ler o documento INTEIRO de ponta a ponta, incluindo as ÚLTIMAS cláusulas.\n"
             "2. Procurar não apenas pelo título exato, mas por SINÔNIMOS e EQUIVALÊNCIAS SEMÂNTICAS.\n"
-            "   Exemplo: a declaração de desimpedimento pode estar em uma cláusula chamada 'DA ADMINISTRAÇÃO',\n"
+            "   Exemplo: a declaração de desimpedimento pode estar em 'DA ADMINISTRAÇÃO',\n"
             "   'DO ADMINISTRADOR', 'VIGÉSIMA NONA', etc. O texto pode dizer 'declara, sob as penas da lei,\n"
             "   que não está impedido' sem usar a palavra 'desimpedimento' no título.\n"
             "3. A cláusula de foro pode estar em 'CLÁUSULA TRIGÉSIMA', 'DO FORO', 'FORO E JURISDIÇÃO',\n"
             "   ou simplesmente conter 'o foro para (...) permanece em [CIDADE]'.\n"
-            "4. Somente após verificar TODO o texto e confirmar com 100%% de certeza que NÃO existe\n"
+            "4. O exercício social pode estar descrito junto ao balanço, em 'CLÁUSULA VIGÉSIMA',\n"
+            "   ou mencionar '1º de janeiro a 31 de dezembro' em qualquer cláusula.\n"
+            "5. Somente após verificar TODO o texto e confirmar com 100%% de certeza que NÃO existe\n"
             "   nenhum trecho equivalente, você pode classificar como is_omission=true.\n"
-            "5. Se existir dúvida, NÃO reporte como omissão. Falsos positivos são PIORES que falsos negativos.\n\n"
+            "6. Se existir QUALQUER dúvida, NÃO reporte como omissão.\n\n"
 
-            "CHECKLIST DE VERIFICAÇÃO OBRIGATÓRIA (verifique cada item contra o texto completo):\n"
-            "• Declaração de desimpedimento do administrador → busque por: 'não está impedido', 'penas da lei',\n"
-            "  'desimpedimento', 'condenação criminal', 'impedido de exercer'.\n"
-            "• Cláusula de foro → busque por: 'foro', 'comarca', 'jurisdição', 'foro para',\n"
-            "  'permanece em', 'fica eleito o foro'.\n"
-            "• Exercício social → busque por: 'exercício social', 'balanço patrimonial', '1º de janeiro',\n"
-            "  '31 de dezembro'.\n"
-            "• Objeto social → busque pela cláusula que descreve as atividades da empresa.\n"
-            "• Capital social → busque por: 'capital social', 'quotas', 'integralização'.\n\n"
+            "CHECKLIST (busque em TODO o texto antes de reportar omissão):\n"
+            "• Desimpedimento → 'não está impedido', 'penas da lei', 'condenação criminal'\n"
+            "• Foro → 'foro', 'comarca', 'jurisdição', 'permanece em'\n"
+            "• Exercício social → 'exercício social', 'balanço', '1º de janeiro', '31 de dezembro'\n"
+            "• Objeto social → atividades da empresa, CNAEs\n"
+            "• Capital social → 'capital social', 'quotas', 'integralização'\n\n"
 
-            "PROCURAR ATIVAMENTE PELAS SEGUINTES 'DORES' CONTÁBEIS:\n"
-            "1. Regras da Junta Comercial (DREI): Omissão de cláusulas obrigatórias para registro de Limitadas (ex: declaração de desimpedimento do administrador, foro, responsabilidade solidária).\n"
-            "2. Objeto Social vs. CNAE: Ambiguidade no objeto social que possa dificultar o enquadramento tributário municipal/nacional ou a obtenção de alvarás.\n"
-            "3. Capital Social: Falta de clareza explícita sobre a forma de integralização do capital (moeda corrente, bens) e o prazo exato para tal.\n"
-            "4. Governança Contábil: Ausência ou má redação das cláusulas de 'Exercício Social', levantamento do Balanço Patrimonial e Distribuição de Lucros/Pró-labore (especialmente a previsão crucial de possível distribuição de lucros desproporcionais).\n"
-            "5. Ortografia e Gramática: Erros ortográficos, gramática incorreta, acentuação errada, concordância verbal/nominal incorreta, pontuação inadequada. Inclua também nomes próprios grafados de forma diferente ao longo do documento, números escritos por extenso que não batem com o valor numérico, e palavras repetidas ou faltantes.\n"
-            "6. Inconsistências Documentais: Dados contraditórios dentro do mesmo documento (ex: nome do sócio grafado de formas diferentes, CPF mencionado mais de uma vez com dígitos divergentes, endereço incompleto ou conflitante entre cláusulas, percentuais de participação que não somam 100%%, datas que se contradizem, referências a cláusulas inexistentes).\n\n"
-            "CLASSIFICAÇÃO DE SEVERIDADE (você DEVE classificar cada issue):\n"
-            "- 'Critical': riscos de alta monta financeira, compliance ou que impedem registro na Junta Comercial.\n"
-            "- 'Mild': inconsistências documentais, erros ortográficos ou problemas menores de formatação.\n\n"
-            "CLASSIFICAÇÃO DE CATEGORIA (use EXATAMENTE uma destas 6 literais):\n"
-            "- 'DREI': problemas relacionados a exigências da Junta Comercial\n"
-            "- 'CNAE': problemas de enquadramento tributário ou objeto social\n"
-            "- 'Capital': problemas na estrutura de capital social\n"
-            "- 'Governança': problemas de governança societária\n"
-            "- 'Ortografia': erros ortográficos, gramaticais ou de pontuação\n"
-            "- 'Inconsistência': dados contraditórios ou incoerentes dentro do documento\n\n"
-            "ATENÇÃO ESTRUTURAL: O arquivo possui identificadores de parágrafos no formato [ID: PX].\n"
-            "Regras de paragraph_id:\n"
-            "- Se o problema está EM um texto que EXISTE no documento, retorne o paragraph_id exato (Ex: 'P4').\n"
-            "- Se o problema é uma OMISSÃO ou AUSÊNCIA (a cláusula NÃO EXISTE no documento), retorne paragraph_id como null e is_omission como true.\n"
-            "  NUNCA invente coordenadas ou aponte para outro trecho quando a cláusula está faltando.\n"
-            "  Exemplos de omissão: 'Ausência de cláusula de foro', 'Falta de declaração de desimpedimento'.\n"
-            "  Nestes casos, paragraph_id DEVE ser null.\n\n"
-            "LIMITE DE ISSUES: Retorne no MÁXIMO 25 issues, priorizando as mais graves (Critical antes de Mild).\n"
-            "Para erros ortográficos repetitivos (ex: mesmo tipo de erro em vários endereços), agrupe-os em uma única issue.\n"
-            "O campo suggested_fix deve ser CONCISO (máximo 500 caracteres por fix).\n\n"
-            "LEMBRETE FINAL: Você está analisando o DOCUMENTO COMPLETO. As cláusulas finais (Vigésima Oitava,\n"
-            "Vigésima Nona, Trigésima, etc.) frequentemente contêm itens obrigatórios como desimpedimento e foro.\n"
-            "NÃO as ignore."
+            "CATEGORIAS DE ANÁLISE (verifique TODAS):\n"
+            "1. DREI: Cláusulas obrigatórias para registro na Junta Comercial.\n"
+            "2. CNAE: Objeto social vs. enquadramento tributário.\n"
+            "3. Capital: Integralização, prazos, forma.\n"
+            "4. Governança: Exercício social, balanço, distribuição de lucros.\n"
+            "5. Ortografia: Erros ortográficos, acentuação, concordância. Agrupe erros repetitivos.\n"
+            "6. Inconsistência: Dados contraditórios (CPF, nomes, percentuais que não somam 100%%).\n\n"
+            
+            "REGRAS DE RESPOSTA:\n"
+            "- Máximo 25 issues, priorizando Critical antes de Mild.\n"
+            "- suggested_fix: máximo 500 caracteres.\n"
+            "- executive_summary: Parecer narrativo em 3 parágrafos (Introdução, Problemas, Conclusão).\n"
+            "  Use \\n\\n entre cada parágrafo.\n"
+            "- risk_level: 'Low' se poucos ou nenhum problema, 'Medium' se problemas menores, 'High' se Critical.\n\n"
+            
+            "ATENÇÃO ESTRUTURAL: O arquivo possui [ID: PX] para mapeamento.\n"
+            "- Problema em texto existente → paragraph_id = 'PX' exato, is_omission = false.\n"
+            "- Cláusula AUSENTE (confirmada 100%%) → paragraph_id = null, is_omission = true.\n"
         )),
-        ("user", "Texto Original (Mapeado por IA Vision):\n\n{text}")
+        ("user", "Analise o contrato completo abaixo:\n\n{text}")
     ])
     
-    chain = prompt | get_llm(task="analyze").with_structured_output(RawIssuesExtraction)
+    chain = prompt | get_llm(task="analyze").with_structured_output(FullAnalysisResult)
     try:
-        # Truncamento INTELIGENTE: preserva início + fim do documento
-        # Cláusulas obrigatórias (foro, desimpedimento) ficam nas últimas páginas
-        MAX_CHARS = 120000
-        if len(text) > MAX_CHARS:
-            # Mantém 85% do início + 15% do final (onde ficam cláusulas obrigatórias)
-            head_size = int(MAX_CHARS * 0.85)
-            tail_size = MAX_CHARS - head_size
-            text_for_llm = (
-                text[:head_size] + 
-                "\n\n[... TRECHO INTERMEDIÁRIO OMITIDO POR LIMITE DE TAMANHO ...]\n\n" + 
-                text[-tail_size:]
-            )
-            logger.warning(
-                f"DetectIssuesNode: texto truncado de {len(text)} para ~{MAX_CHARS} chars "
-                f"(head={head_size}, tail={tail_size}, {len(text) - MAX_CHARS} chars do meio omitidos)"
-            )
-        else:
-            text_for_llm = text
         result = chain.invoke({"text": text_for_llm})
-        logger.info(f"DetectIssuesNode: {len(result.issues)} issues detectadas")
-        return {"raw_issues": result.issues}
+        logger.info(f"UnifiedAnalysis: {len(result.issues)} issues, risk={result.risk_level}")
+        return {
+            "raw_issues": result.issues,
+            "summary": AnalysisSummary(
+                executive_summary=result.executive_summary,
+                risk_level=result.risk_level if result.risk_level in ["Low", "Medium", "High"] else "Medium"
+            ),
+            "cleaned_text": text  # Texto original sem marcadores para o editor
+        }
     except Exception as e:
-        logger.error(f"Erro no structured output - tentando fallback JSON: {e}")
+        logger.error(f"Erro no UnifiedAnalysis - tentando fallback: {e}")
         # Fallback: tenta extrair o JSON bruto da mensagem de erro
         try:
-            import json, re
             error_str = str(e)
-            # Procura pelo JSON dentro da mensagem de erro
-            json_match = re.search(r'\{"issues"\s*:\s*\[.*\]\}', error_str, re.DOTALL)
+            json_match = re.search(r'\{.*"issues"\s*:\s*\[.*\].*\}', error_str, re.DOTALL)
             if json_match:
                 raw_json = json.loads(json_match.group())
-                parsed = RawIssuesExtraction(**raw_json)
-                logger.info(f"DetectIssuesNode (fallback): {len(parsed.issues)} issues recuperadas do JSON bruto")
-                return {"raw_issues": parsed.issues}
+                parsed = FullAnalysisResult(**raw_json)
+                logger.info(f"UnifiedAnalysis (fallback): {len(parsed.issues)} issues recuperadas")
+                return {
+                    "raw_issues": parsed.issues,
+                    "summary": AnalysisSummary(
+                        executive_summary=parsed.executive_summary,
+                        risk_level=parsed.risk_level if parsed.risk_level in ["Low", "Medium", "High"] else "Medium"
+                    ),
+                    "cleaned_text": text
+                }
         except Exception as fallback_err:
-            logger.error(f"Fallback JSON também falhou: {fallback_err}")
-        return {"raw_issues": []}
+            logger.error(f"Fallback também falhou: {fallback_err}")
+        
+        return {
+            "raw_issues": [],
+            "summary": AnalysisSummary(
+                executive_summary="Análise temporariamente indisponível. Tente novamente.",
+                risk_level="High"
+            ),
+            "cleaned_text": text
+        }
 
+
+# ================================================================
+# NÓ DETERMINÍSTICO: Converte raw_issues → Issues finais com BBoxes
+# ================================================================
 def classify_issues_node(state: WorkflowState) -> WorkflowState:
-    """Nó DETERMINÍSTICO (zero IA): converte raw_issues em Issues finais e injeta BBoxes do Parser.
-    Nenhuma chamada LLM aqui — a classificação de severity já veio do detect_issues_node.
-    Isso GARANTE que o índice de raw_issues[i] sempre corresponde ao issue[i] correto."""
+    """Nó DETERMINÍSTICO (zero IA): converte raw_issues em Issues finais e injeta BBoxes do Parser."""
     raw_issues = state.get("raw_issues", [])
     if not raw_issues:
         return {"issues": []}
@@ -189,7 +179,6 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
     for raw in raw_issues:
         bbox_data = None
         
-        # Regra de Ouro: se é omissão ou paragraph_id é nulo, JAMAIS atribuir bbox
         if not raw.is_omission and raw.paragraph_id and raw.paragraph_id.strip():
             pid = raw.paragraph_id.strip()
             if pid in mapping:
@@ -202,15 +191,12 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
         elif raw.is_omission:
             logger.info(f"Issue '{raw.title}' -> OMISSÃO detectada, sem highlight")
         
-        # Normaliza severity para valores válidos
         severity = "Critical" if raw.severity and raw.severity.lower() == "critical" else "Mild"
-        
-        # Garante a tipagem de category para não quebrar a spec Pydantic / UI
         valid_cats = ["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"]
         cat = raw.category if raw.category in valid_cats else "DREI"
 
         issue = Issue(
-            id=f"issue_{raw_issues.index(raw) + 1}",
+            id=f"issue_{len(final_issues) + 1}",
             title=raw.title,
             description=raw.description,
             severity=severity,
@@ -222,46 +208,28 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
         )
         final_issues.append(issue)
     
-    logger.info(f"ClassifyNode: {len(final_issues)} issues processadas, {sum(1 for i in final_issues if i.bounding_box)} com bbox")
+    logger.info(f"ClassifyNode: {len(final_issues)} issues finalizadas")
     return {"issues": final_issues}
 
-def generate_summary_node(state: WorkflowState) -> WorkflowState:
-    text = state.get("cleaned_text") or state["document_context"]["clean_text_for_llm"]
-    issues = state.get("issues", [])
-    issues_str = "\\n".join([f"- {i.title} (Severity: {i.severity})" for i in issues])
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "Produza o Resumo Executivo final validando os riscos catalogados frente ao texto original.\n"
-                   "Escreva no modelo de um Parecer Narrativo formal contendo 3 parágrafos lógicos (Introdução, Problemas, Conclusão). "
-                   "USE OBRIGATORIAMENTE duas quebras de linha (\\n\\n) entre cada parágrafo para garantir a legibilidade."),
-        ("user", "Problemas Detectados:\n{issues}\n\nExceto do Contrato Original:\n{text}")
-    ])
-    
-    chain = prompt | get_llm(task="summary").with_structured_output(SummaryGeneration)
-    try:
-        result = chain.invoke({"issues": issues_str, "text": text[:60000]})
-        return {"summary": result.summary}
-    except Exception as e:
-        import traceback
-        with open("error_trace.log", "w", encoding="utf-8") as f:
-            f.write(traceback.format_exc())
-        return {"summary": AnalysisSummary(executive_summary="Resumo Temporariamente Indisponível.", risk_level="High")}
 
+# ================================================================
+# NÓ DETERMINÍSTICO: Calcula score baseado em issues + risk_level
+# ================================================================
 def calculate_score_node(state: WorkflowState) -> WorkflowState:
     issues = state.get("issues", [])
     summary = state["summary"]
     
-    # Score baseado nos issues detectados
     score = 100
     for issue in issues:
         score -= 15 if issue.severity == "Critical" else 4
     
-    # Garantia de consistência: se o resumo diz Medium/High mas não há issues,
-    # ajustar o score para refletir o risk_level (evita score 100 com risco Medium)
+    # Consistência: score deve refletir o risk_level
     if summary.risk_level == "High" and score > 50:
         score = min(score, 45)
     elif summary.risk_level == "Medium" and score > 80:
         score = min(score, 72)
+    elif summary.risk_level == "Low" and score < 70:
+        score = max(score, 70)
     
     score = max(0, min(100, score))
     
@@ -269,27 +237,25 @@ def calculate_score_node(state: WorkflowState) -> WorkflowState:
         document_health_score=score,
         summary=summary,
         issues=state["issues"],
-        # Prioriza o texto limpo da Lavanderia, cai para o raw se falhar
         original_text=state.get("cleaned_text") or state.get("document_context", {}).get("clean_text_for_llm", "")
     )
     return {"score": score, "final_result": final_result}
 
+
+# ================================================================
+# GRAFO OTIMIZADO: 1 chamada LLM + 2 nós determinísticos
+# ================================================================
+# ANTES: CleanText(LLM) → Detect(LLM) → Classify → Summary(LLM) → Score  = 3 LLM calls
+# AGORA: UnifiedAnalysis(LLM) → Classify → Score                          = 1 LLM call
+# ================================================================
 workflow = StateGraph(WorkflowState)
-workflow.add_node("CleanTextNode", clean_text_node)        # Lavanderia OCR
-workflow.add_node("DetectIssuesNode", detect_issues_node)
+workflow.add_node("UnifiedAnalysisNode", unified_analysis_node)
 workflow.add_node("ClassifyIssuesNode", classify_issues_node)
-workflow.add_node("GenerateSummaryNode", generate_summary_node)
 workflow.add_node("CalculateScoreNode", calculate_score_node)
 
-# ═══════════════════════════════════════════════════════════
-# GRAFO PARALELO: CleanText e DetectIssues rodam SIMULTANEAMENTE
-# pois ambos leem apenas do document_context (input original)
-# ═══════════════════════════════════════════════════════════
-workflow.set_entry_point("CleanTextNode")
-workflow.add_edge("CleanTextNode", "DetectIssuesNode")
-workflow.add_edge("DetectIssuesNode", "ClassifyIssuesNode")
-workflow.add_edge("ClassifyIssuesNode", "GenerateSummaryNode")
-workflow.add_edge("GenerateSummaryNode", "CalculateScoreNode")
+workflow.set_entry_point("UnifiedAnalysisNode")
+workflow.add_edge("UnifiedAnalysisNode", "ClassifyIssuesNode")
+workflow.add_edge("ClassifyIssuesNode", "CalculateScoreNode")
 workflow.add_edge("CalculateScoreNode", END)
 
 ai_contract_reviewer = workflow.compile()
