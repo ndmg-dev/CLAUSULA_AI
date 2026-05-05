@@ -116,13 +116,12 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
             "5. Ortografia: Erros ortográficos, acentuação, concordância. Agrupe erros repetitivos em uma única issue.\n"
             "6. Inconsistência: Dados contraditórios (CPF, nomes, percentuais que não somam 100%%).\n\n"
             
-            "REGRAS:\n"
-            "- Máximo 25 issues. Priorize Critical antes de Mild.\n"
-            "- 'Critical': impede registro ou gera risco financeiro/legal grave.\n"
-            "- 'Mild': melhorias de redação, erros menores.\n"
+            "REGRAS DE SEVERIDADE (SEVERITY):\n"
+            "- 'Critical': APENAS para erros que impedem registro (DREI, CNAE, Capital Inconsistente) ou geram risco financeiro/legal grave.\n"
+            "- 'Mild': OBRIGATÓRIO para erros de 'Ortografia', 'Falta de clareza', formatação ou melhorias de redação. NUNCA classifique problemas textuais ou ortográficos como Critical.\n"
             "- suggested_fix: OBRIGATORIAMENTE texto jurídico FINAL da cláusula corrigida.\n"
             "  Este campo será colado diretamente no documento Word.\n"
-            "  CORRETO: 'CLÁUSULA DÉCIMA SEGUNDA: O exercício social terá início em 1º de janeiro e término em 31 de dezembro de cada ano, quando serão levantados o balanço patrimonial e o balanço de resultado econômico.'\n"
+            "  CORRETO: 'CLÁUSULA DÉCIMA SEGUNDA: O exercício social terá início em 1º de janeiro...'\n"
             "  ERRADO: 'Revisar a cláusula para incluir...'\n"
             "  ERRADO: 'Incluir uma cláusula específica definindo...'\n"
             "- executive_summary: Parecer em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre eles.\n"
@@ -268,29 +267,46 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
 
 
 # ================================================================
-# NÓ DETERMINÍSTICO: Calcula score baseado em issues + risk_level
+# NÓ DETERMINÍSTICO: Calcula score baseado APENAS nas issues reais
+# O risk_level é DERIVADO do score — nunca o contrário.
 # ================================================================
 def calculate_score_node(state: WorkflowState) -> WorkflowState:
     issues = state.get("issues", [])
     summary = state["summary"]
     
+    # Score calculado puramente pelas issues detectadas
     score = 100
     for issue in issues:
-        score -= 15 if issue.severity == "Critical" else 4
-    
-    # Consistência: score deve refletir o risk_level
-    if summary.risk_level == "High" and score > 50:
-        score = min(score, 45)
-    elif summary.risk_level == "Medium" and score > 80:
-        score = min(score, 72)
-    elif summary.risk_level == "Low" and score < 70:
-        score = max(score, 70)
+        if issue.severity == "Critical":
+            score -= 15
+        else:
+            score -= 5
     
     score = max(0, min(100, score))
     
+    # risk_level é DERIVADO do score (fonte única de verdade)
+    if score >= 80:
+        derived_risk = "Low"
+    elif score >= 50:
+        derived_risk = "Medium"
+    else:
+        derived_risk = "High"
+    
+    # Sobrescreve o risk_level da LLM pelo calculado
+    corrected_summary = AnalysisSummary(
+        executive_summary=summary.executive_summary,
+        risk_level=derived_risk
+    )
+    
+    logger.info(
+        f"ScoreNode: score={score}, risk={derived_risk} "
+        f"(LLM disse '{summary.risk_level}', corrigido para '{derived_risk}'), "
+        f"{len(issues)} issues ({sum(1 for i in issues if i.severity == 'Critical')} Critical)"
+    )
+    
     final_result = AnalysisResult(
         document_health_score=score,
-        summary=summary,
+        summary=corrected_summary,
         issues=state["issues"],
         original_text=state.get("cleaned_text") or state.get("document_context", {}).get("clean_text_for_llm", "")
     )
