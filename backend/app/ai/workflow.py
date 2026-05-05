@@ -22,7 +22,7 @@ class UnclassifiedIssue(BaseModel):
     paragraph_id: Optional[str] = Field(default=None, description="ID exato do parágrafo (ex: 'P12'). DEVE ser null se for omissão.")
     is_omission: bool = Field(default=False, description="True se a cláusula NÃO EXISTE no documento.")
     category: str = Field(description="Literal: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
-    suggested_fix: Optional[str] = Field(default=None, description="Texto COMPLETO sugerido pela IA para inserir ou substituir no documento original. Forneça o texto limpo, pronto para ser copiado-e-colado. Traga o texto da cláusula inteira.")
+    suggested_fix: Optional[str] = Field(default=None, description="Texto FINAL da cláusula corrigida — NUNCA instruções. Este texto será inserido diretamente no documento Word pelo botão 'Corrigir Automaticamente'. Deve ser o texto jurídico completo da cláusula reescrita, pronto para uso. Exemplo correto: 'CLÁUSULA DÉCIMA: O exercício social iniciar-se-á em 1º de janeiro e encerrar-se-á em 31 de dezembro de cada ano.' Exemplo ERRADO: 'Revisar a cláusula para incluir o exercício social.'")
 
 class FullAnalysisResult(BaseModel):
     """Resposta unificada: issues + summary em uma única chamada LLM."""
@@ -120,7 +120,11 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
             "- Máximo 25 issues. Priorize Critical antes de Mild.\n"
             "- 'Critical': impede registro ou gera risco financeiro/legal grave.\n"
             "- 'Mild': melhorias de redação, erros menores.\n"
-            "- suggested_fix: forneça o texto COMPLETO da cláusula corrigida, pronto para copiar-e-colar.\n"
+            "- suggested_fix: OBRIGATORIAMENTE texto jurídico FINAL da cláusula corrigida.\n"
+            "  Este campo será colado diretamente no documento Word.\n"
+            "  CORRETO: 'CLÁUSULA DÉCIMA SEGUNDA: O exercício social terá início em 1º de janeiro e término em 31 de dezembro de cada ano, quando serão levantados o balanço patrimonial e o balanço de resultado econômico.'\n"
+            "  ERRADO: 'Revisar a cláusula para incluir...'\n"
+            "  ERRADO: 'Incluir uma cláusula específica definindo...'\n"
             "- executive_summary: Parecer em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre eles.\n"
             "- risk_level: 'Low' se o documento está adequado, 'Medium' se há ajustes menores, 'High' se há Critical.\n\n"
             
@@ -173,20 +177,61 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
 
 
 # ================================================================
+# VERIFICADOR DETERMINÍSTICO DE OMISSÕES FALSAS
+# Busca keywords no texto original. Se encontrar, rejeita a omissão.
+# ================================================================
+OMISSION_KEYWORDS = {
+    "foro": ["foro", "comarca", "jurisdição", "foro competente", "fica eleito"],
+    "desimpedimento": ["não está impedido", "penas da lei", "desimpedimento", "condenação criminal", "impedido de exercer", "impedimento"],
+    "exercício social": ["exercício social", "balanço patrimonial", "1º de janeiro", "31 de dezembro", "encerramento do exercício"],
+    "objeto social": ["objeto social", "atividades econômicas", "cnae", "atividade principal", "do objeto"],
+    "capital social": ["capital social", "integralização", "quotas", "valor nominal"],
+    "administração": ["administração", "administrador", "poderes de gestão", "sócio administrador"],
+    "distribuição": ["distribuição de lucros", "pró-labore", "dividendos", "lucros e perdas"],
+}
+
+def _is_false_omission(issue_title: str, issue_description: str, full_text: str) -> bool:
+    """Verifica se uma omissão é falsa buscando keywords no texto original.
+    Retorna True se a cláusula EXISTE no documento (logo a omissão é falsa)."""
+    text_lower = full_text.lower()
+    combined = (issue_title + " " + issue_description).lower()
+    
+    for topic, keywords in OMISSION_KEYWORDS.items():
+        # Checa se esta issue é sobre este tópico
+        if topic in combined or any(kw in combined for kw in keywords):
+            # Se qualquer keyword deste tópico existe no texto, a omissão é falsa
+            for kw in keywords:
+                if kw in text_lower:
+                    logger.warning(
+                        f"OMISSÃO FALSA DETECTADA e REMOVIDA: '{issue_title}' "
+                        f"— keyword '{kw}' encontrada no documento"
+                    )
+                    return True
+    return False
+
+
+# ================================================================
 # NÓ DETERMINÍSTICO: Converte raw_issues → Issues finais com BBoxes
 # ================================================================
 def classify_issues_node(state: WorkflowState) -> WorkflowState:
-    """Nó DETERMINÍSTICO (zero IA): converte raw_issues em Issues finais e injeta BBoxes do Parser."""
+    """Nó DETERMINÍSTICO (zero IA): converte raw_issues em Issues finais,
+    injeta BBoxes do Parser e FILTRA omissões falsas via busca de keywords."""
     raw_issues = state.get("raw_issues", [])
     if not raw_issues:
         return {"issues": []}
     
     mapping = state["document_context"]["paragraph_mapping"]
+    full_text = state["document_context"]["clean_text_for_llm"]
     final_issues = []
+    filtered_count = 0
     
     for raw in raw_issues:
-        bbox_data = None
+        # FILTRO ANTI-ALUCINAÇÃO: rejeita omissões falsas
+        if raw.is_omission and _is_false_omission(raw.title, raw.description, full_text):
+            filtered_count += 1
+            continue
         
+        bbox_data = None
         if not raw.is_omission and raw.paragraph_id and raw.paragraph_id.strip():
             pid = raw.paragraph_id.strip()
             if pid in mapping:
@@ -197,7 +242,7 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
             else:
                 logger.warning(f"Issue '{raw.title}' -> paragraph_id '{pid}' não encontrado no mapping")
         elif raw.is_omission:
-            logger.info(f"Issue '{raw.title}' -> OMISSÃO detectada, sem highlight")
+            logger.info(f"Issue '{raw.title}' -> OMISSÃO confirmada (passou verificação)")
         
         severity = "Critical" if raw.severity and raw.severity.lower() == "critical" else "Mild"
         valid_cats = ["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"]
@@ -216,6 +261,8 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
         )
         final_issues.append(issue)
     
+    if filtered_count > 0:
+        logger.info(f"ClassifyNode: {filtered_count} omissões falsas REMOVIDAS")
     logger.info(f"ClassifyNode: {len(final_issues)} issues finalizadas")
     return {"issues": final_issues}
 
