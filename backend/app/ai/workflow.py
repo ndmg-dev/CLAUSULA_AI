@@ -22,7 +22,7 @@ class UnclassifiedIssue(BaseModel):
     paragraph_id: Optional[str] = Field(default=None, description="ID exato do parágrafo (ex: 'P12'). DEVE ser null se for omissão.")
     is_omission: bool = Field(default=False, description="True se a cláusula NÃO EXISTE no documento.")
     category: str = Field(description="Literal: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
-    suggested_fix: Optional[str] = Field(default=None, description="Texto sugerido para correção (máx 500 chars).")
+    suggested_fix: Optional[str] = Field(default=None, description="Texto COMPLETO sugerido pela IA para inserir ou substituir no documento original. Forneça o texto limpo, pronto para ser copiado-e-colado. Traga o texto da cláusula inteira.")
 
 class FullAnalysisResult(BaseModel):
     """Resposta unificada: issues + summary em uma única chamada LLM."""
@@ -64,61 +64,69 @@ def _smart_truncate(text: str, max_chars: int = 120000) -> str:
 # ================================================================
 def unified_analysis_node(state: WorkflowState) -> WorkflowState:
     """Análise UNIFICADA em uma ÚNICA chamada LLM.
-    Detecta issues, classifica e gera resumo executivo — tudo de uma vez.
-    Elimina 2 chamadas LLM extras, cortando o tempo pela metade."""
+    Detecta issues, classifica e gera resumo executivo — tudo de uma vez."""
     
     text = state["document_context"]["clean_text_for_llm"]
     text_for_llm = _smart_truncate(text)
+    has_paragraph_ids = "[ID: P" in text
+    
+    # Bloco de mapeamento estrutural: só se o texto tiver marcadores [ID: PX]
+    structural_block = ""
+    if has_paragraph_ids:
+        structural_block = (
+            "MAPEAMENTO ESTRUTURAL: O texto contém marcadores [ID: PX].\n"
+            "- Se o problema está em texto existente → paragraph_id = 'PX' exato do trecho.\n"
+            "- Se é OMISSÃO confirmada → paragraph_id = null.\n\n"
+        )
+    else:
+        structural_block = (
+            "MAPEAMENTO: Este texto veio diretamente do Word, sem marcadores de parágrafo.\n"
+            "- Defina paragraph_id como null para todas as issues.\n"
+            "- Use clause_reference para indicar qual cláusula é afetada (ex: 'Cláusula Oitava').\n\n"
+        )
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", (
-            "Você é um Analista Societário Sênior atuando em um Escritório de Contabilidade.\n"
-            "Sua missão é auditar este contrato social/alteração contratual e produzir um parecer completo.\n\n"
+            "Você é um Analista Societário Sênior em um Escritório de Contabilidade.\n"
+            "Audite o contrato social/alteração contratual abaixo e produza um parecer completo.\n\n"
             
-            "═══════════════════════════════════════════════════════════\n"
-            "  REGRA SUPREMA — ANTI-ALUCINAÇÃO (LEIA ANTES DE TUDO)\n"
-            "═══════════════════════════════════════════════════════════\n"
-            "ANTES de reportar QUALQUER omissão, você DEVE:\n"
-            "1. Ler o documento INTEIRO de ponta a ponta, incluindo as ÚLTIMAS cláusulas.\n"
-            "2. Procurar não apenas pelo título exato, mas por SINÔNIMOS e EQUIVALÊNCIAS SEMÂNTICAS.\n"
-            "   Exemplo: a declaração de desimpedimento pode estar em 'DA ADMINISTRAÇÃO',\n"
-            "   'DO ADMINISTRADOR', 'VIGÉSIMA NONA', etc. O texto pode dizer 'declara, sob as penas da lei,\n"
-            "   que não está impedido' sem usar a palavra 'desimpedimento' no título.\n"
-            "3. A cláusula de foro pode estar em 'CLÁUSULA TRIGÉSIMA', 'DO FORO', 'FORO E JURISDIÇÃO',\n"
-            "   ou simplesmente conter 'o foro para (...) permanece em [CIDADE]'.\n"
-            "4. O exercício social pode estar descrito junto ao balanço, em 'CLÁUSULA VIGÉSIMA',\n"
-            "   ou mencionar '1º de janeiro a 31 de dezembro' em qualquer cláusula.\n"
-            "5. Somente após verificar TODO o texto e confirmar com 100%% de certeza que NÃO existe\n"
-            "   nenhum trecho equivalente, você pode classificar como is_omission=true.\n"
-            "6. Se existir QUALQUER dúvida, NÃO reporte como omissão.\n\n"
+            "══════════════════════════════════════════════════════\n"
+            "  REGRA SUPREMA — ANTI-ALUCINAÇÃO\n"
+            "══════════════════════════════════════════════════════\n"
+            "ANTES de reportar uma omissão (is_omission=true), VOCÊ DEVE:\n"
+            "1. Ler o documento INTEIRO, especialmente as ÚLTIMAS cláusulas.\n"
+            "2. Buscar SINÔNIMOS e EQUIVALÊNCIAS. Exemplos:\n"
+            "   - Desimpedimento pode estar em 'DA ADMINISTRAÇÃO', 'VIGÉSIMA NONA',\n"
+            "     ou qualquer trecho com 'declara, sob as penas da lei, que não está impedido'.\n"
+            "   - Foro pode estar em 'CLÁUSULA TRIGÉSIMA', 'DO FORO', ou\n"
+            "     'o foro para (...) permanece em [CIDADE]'.\n"
+            "   - Exercício social pode mencionar '1º de janeiro a 31 de dezembro'\n"
+            "     em qualquer cláusula, não necessariamente com o título 'exercício social'.\n"
+            "   - Objeto social pode estar em 'DO OBJETO', 'DAS ATIVIDADES', ou\n"
+            "     qualquer cláusula listando atividades econômicas/CNAEs.\n"
+            "3. SÓ classifique como omissão se tiver 100%% de certeza ABSOLUTA\n"
+            "   de que NÃO EXISTE nenhum trecho equivalente em TODO o documento.\n"
+            "4. NA DÚVIDA, NÃO reporte como omissão. Falso positivo é PIOR que falso negativo.\n\n"
 
-            "CHECKLIST (busque em TODO o texto antes de reportar omissão):\n"
-            "• Desimpedimento → 'não está impedido', 'penas da lei', 'condenação criminal'\n"
-            "• Foro → 'foro', 'comarca', 'jurisdição', 'permanece em'\n"
-            "• Exercício social → 'exercício social', 'balanço', '1º de janeiro', '31 de dezembro'\n"
-            "• Objeto social → atividades da empresa, CNAEs\n"
-            "• Capital social → 'capital social', 'quotas', 'integralização'\n\n"
-
-            "CATEGORIAS DE ANÁLISE (verifique TODAS):\n"
+            "O QUE ANALISAR:\n"
             "1. DREI: Cláusulas obrigatórias para registro na Junta Comercial.\n"
             "2. CNAE: Objeto social vs. enquadramento tributário.\n"
-            "3. Capital: Integralização, prazos, forma.\n"
+            "3. Capital: Integralização, prazos, forma de pagamento.\n"
             "4. Governança: Exercício social, balanço, distribuição de lucros.\n"
-            "5. Ortografia: Erros ortográficos, acentuação, concordância. Agrupe erros repetitivos.\n"
+            "5. Ortografia: Erros ortográficos, acentuação, concordância. Agrupe erros repetitivos em uma única issue.\n"
             "6. Inconsistência: Dados contraditórios (CPF, nomes, percentuais que não somam 100%%).\n\n"
             
-            "REGRAS DE RESPOSTA:\n"
-            "- Máximo 25 issues, priorizando Critical antes de Mild.\n"
-            "- suggested_fix: máximo 500 caracteres.\n"
-            "- executive_summary: Parecer narrativo em 3 parágrafos (Introdução, Problemas, Conclusão).\n"
-            "  Use \\n\\n entre cada parágrafo.\n"
-            "- risk_level: 'Low' se poucos ou nenhum problema, 'Medium' se problemas menores, 'High' se Critical.\n\n"
+            "REGRAS:\n"
+            "- Máximo 25 issues. Priorize Critical antes de Mild.\n"
+            "- 'Critical': impede registro ou gera risco financeiro/legal grave.\n"
+            "- 'Mild': melhorias de redação, erros menores.\n"
+            "- suggested_fix: forneça o texto COMPLETO da cláusula corrigida, pronto para copiar-e-colar.\n"
+            "- executive_summary: Parecer em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre eles.\n"
+            "- risk_level: 'Low' se o documento está adequado, 'Medium' se há ajustes menores, 'High' se há Critical.\n\n"
             
-            "ATENÇÃO ESTRUTURAL: O arquivo possui [ID: PX] para mapeamento.\n"
-            "- Problema em texto existente → paragraph_id = 'PX' exato, is_omission = false.\n"
-            "- Cláusula AUSENTE (confirmada 100%%) → paragraph_id = null, is_omission = true.\n"
+            + structural_block
         )),
-        ("user", "Analise o contrato completo abaixo:\n\n{text}")
+        ("user", "Contrato completo para auditoria:\n\n{text}")
     ])
     
     chain = prompt | get_llm(task="analyze").with_structured_output(FullAnalysisResult)
