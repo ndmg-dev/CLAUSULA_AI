@@ -1,8 +1,8 @@
 import logging
 from typing import Dict, TypedDict, List, Optional
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
+from app.core.llm_provider import get_llm
 
 from app.schemas.analysis_schema import Issue, AnalysisSummary, AnalysisResult, BoundingBox
 from pydantic import BaseModel, Field
@@ -35,7 +35,7 @@ class WorkflowState(TypedDict):
     score: int
     final_result: AnalysisResult
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
 
 def clean_text_node(state: WorkflowState) -> WorkflowState:
     """Lavanderia de Texto: remove ruídos de OCR, marcadores [ID: PX], numeração de página
@@ -57,6 +57,7 @@ def clean_text_node(state: WorkflowState) -> WorkflowState:
     ])
     
     try:
+        llm = get_llm(task="clean")
         response = llm.invoke(prompt.format_messages(raw_text=raw_text[:80000]))
         cleaned = response.content.strip()
         logger.info(f"CleanTextNode: texto limpo com {len(cleaned)} chars (original: {len(raw_text)} chars)")
@@ -131,7 +132,7 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
         ("user", "Texto Original (Mapeado por IA Vision):\n\n{text}")
     ])
     
-    chain = prompt | llm.with_structured_output(RawIssuesExtraction)
+    chain = prompt | get_llm(task="analyze").with_structured_output(RawIssuesExtraction)
     try:
         result = chain.invoke({"text": text[:90000]})
         return {"raw_issues": result.issues}
@@ -201,7 +202,7 @@ def generate_summary_node(state: WorkflowState) -> WorkflowState:
         ("user", "Problemas Detectados:\n{issues}\n\nExceto do Contrato Original:\n{text}")
     ])
     
-    chain = prompt | llm.with_structured_output(SummaryGeneration)
+    chain = prompt | get_llm(task="summary").with_structured_output(SummaryGeneration)
     try:
         result = chain.invoke({"issues": issues_str, "text": text[:60000]})
         return {"summary": result.summary}

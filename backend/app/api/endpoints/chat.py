@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-from langchain_openai import ChatOpenAI
+from app.core.llm_provider import get_llm
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 router = APIRouter()
@@ -32,8 +32,8 @@ async def chat_stream(payload: ChatPayload):
             else:
                 langchain_messages.append(HumanMessage(content=content))
 
-        # Reusing the gpt-4o configuration used in the rest of the application
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+        # Motor de IA baseado no provider configurado
+        llm = get_llm(task="chat")
 
         async def generate():
             async for chunk in llm.astream(langchain_messages):

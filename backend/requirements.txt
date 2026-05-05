@@ -9,6 +9,7 @@ python-multipart==0.0.9
 langchain>=0.1.13
 langgraph>=0.0.30
 langchain-openai>=0.1.1
+langchain-ollama>=0.1.0  # Suporte futuro para LLMs locais via Ollama
 
 # --- OCR & DOCUMENT PARSING (LIGHTWEIGHT) ---
 # PyMuPDF extrai texto e bbox de PDFs sem dor de cabeça de ML
