@@ -3,7 +3,8 @@ import {
   Shield, AlertTriangle, CheckCircle2, FileSearch, 
   Loader2, ChevronDown, ChevronRight, Sparkles, 
   ClipboardCheck, Building2, Receipt, Scale,
-  Library, Activity, CloudUpload, MessageSquare, PenTool
+  Library, Activity, CloudUpload, MessageSquare, PenTool,
+  SpellCheck, AlertCircle
 } from 'lucide-react';
 import { useAuditStore, MOCK_RESULT, type AuditIssue } from '../store/useAuditStore';
 import { getContractText, applySuggestion, highlightClause, focusClause, insertCommentToClause, getWordDocumentAsBase64, replaceClauseIntelligently, insertNewClauseAtPosition } from '../services/wordInterface';
@@ -16,10 +17,12 @@ import { CopilotChat } from './CopilotChat';
 // MAPA DE CATEGORIAS -> ÍCONE + LABEL CONTÁBIL
 // ================================================================
 const CATEGORY_MAP: Record<string, { icon: typeof Shield; label: string; color: string }> = {
-  DREI:      { icon: Building2,     label: 'Exigência da Junta',       color: 'text-red-600' },
-  CNAE:      { icon: Receipt,       label: 'Enquadramento Tributário', color: 'text-amber-600' },
-  Capital:   { icon: Scale,         label: 'Estrutura de Capital',     color: 'text-orange-600' },
-  Governança:{ icon: ClipboardCheck,label: 'Governança Societária',    color: 'text-blue-600' },
+  DREI:          { icon: Building2,     label: 'Exigência da Junta',       color: 'text-red-600' },
+  CNAE:          { icon: Receipt,       label: 'Enquadramento Tributário', color: 'text-amber-600' },
+  Capital:       { icon: Scale,         label: 'Estrutura de Capital',     color: 'text-orange-600' },
+  Governança:    { icon: ClipboardCheck, label: 'Governança Societária',    color: 'text-blue-600' },
+  Ortografia:    { icon: SpellCheck,     label: 'Ortografia / Gramática',   color: 'text-purple-600' },
+  Inconsistência:{ icon: AlertCircle,    label: 'Inconsistência Documental', color: 'text-rose-600' },
 };
 
 // ================================================================

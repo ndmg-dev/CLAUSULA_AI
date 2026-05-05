@@ -16,7 +16,7 @@ class UnclassifiedIssue(BaseModel):
     clause_reference: str = Field(description="A qual cláusula ou seção isso se refere.")
     paragraph_id: Optional[str] = Field(default=None, description="O ID exato do parágrafo onde a falha reside (ex: 'P12'). DEVE ser null/None se o problema for uma OMISSÃO ou AUSÊNCIA de cláusula — nunca invente coordenadas para algo que não existe no texto.")
     is_omission: bool = Field(default=False, description="True se o problema é a AUSÊNCIA/OMISSÃO de uma cláusula que deveria existir. False se o problema está em um texto que realmente existe no documento.")
-    category: str = Field(description="Obrigatório usar UMA dessas 4 literais exatas: 'DREI', 'CNAE', 'Capital', ou 'Governança'.")
+    category: str = Field(description="Obrigatório usar UMA dessas 6 literais exatas: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
     suggested_fix: Optional[str] = Field(default=None, description="Texto COMPLETO sugerido pela IA para inserir ou substituir no documento original. Forneça o texto limpo, pronto para ser copiado-e-colado. Traga o texto da cláusula inteira.")
 
 class RawIssuesExtraction(BaseModel):
@@ -104,10 +104,19 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
             "1. Regras da Junta Comercial (DREI): Omissão de cláusulas obrigatórias para registro de Limitadas (ex: declaração de desimpedimento do administrador, foro, responsabilidade solidária).\n"
             "2. Objeto Social vs. CNAE: Ambiguidade no objeto social que possa dificultar o enquadramento tributário municipal/nacional ou a obtenção de alvarás.\n"
             "3. Capital Social: Falta de clareza explícita sobre a forma de integralização do capital (moeda corrente, bens) e o prazo exato para tal.\n"
-            "4. Governança Contábil: Ausência ou má redação das cláusulas de 'Exercício Social', levantamento do Balanço Patrimonial e Distribuição de Lucros/Pró-labore (especialmente a previsão crucial de possível distribuição de lucros desproporcionais).\n\n"
+            "4. Governança Contábil: Ausência ou má redação das cláusulas de 'Exercício Social', levantamento do Balanço Patrimonial e Distribuição de Lucros/Pró-labore (especialmente a previsão crucial de possível distribuição de lucros desproporcionais).\n"
+            "5. Ortografia e Gramática: Erros ortográficos, gramática incorreta, acentuação errada, concordância verbal/nominal incorreta, pontuação inadequada. Inclua também nomes próprios grafados de forma diferente ao longo do documento, números escritos por extenso que não batem com o valor numérico, e palavras repetidas ou faltantes.\n"
+            "6. Inconsistências Documentais: Dados contraditórios dentro do mesmo documento (ex: nome do sócio grafado de formas diferentes, CPF mencionado mais de uma vez com dígitos divergentes, endereço incompleto ou conflitante entre cláusulas, percentuais de participação que não somam 100%%, datas que se contradizem, referências a cláusulas inexistentes).\n\n"
             "CLASSIFICAÇÃO DE SEVERIDADE (você DEVE classificar cada issue):\n"
             "- 'Critical': riscos de alta monta financeira, compliance ou que impedem registro na Junta Comercial.\n"
-            "- 'Mild': inconsistências documentais ou erros menores.\n\n"
+            "- 'Mild': inconsistências documentais, erros ortográficos ou problemas menores de formatação.\n\n"
+            "CLASSIFICAÇÃO DE CATEGORIA (use EXATAMENTE uma destas 6 literais):\n"
+            "- 'DREI': problemas relacionados a exigências da Junta Comercial\n"
+            "- 'CNAE': problemas de enquadramento tributário ou objeto social\n"
+            "- 'Capital': problemas na estrutura de capital social\n"
+            "- 'Governança': problemas de governança societária\n"
+            "- 'Ortografia': erros ortográficos, gramaticais ou de pontuação\n"
+            "- 'Inconsistência': dados contraditórios ou incoerentes dentro do documento\n\n"
             "ATENÇÃO ESTRUTURAL: O arquivo possui identificadores de parágrafos no formato [ID: PX].\n"
             "Regras de paragraph_id:\n"
             "- Se o problema está EM um texto que EXISTE no documento, retorne o paragraph_id exato (Ex: 'P4').\n"
@@ -161,7 +170,8 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
         severity = "Critical" if raw.severity and raw.severity.lower() == "critical" else "Mild"
         
         # Garante a tipagem de category para não quebrar a spec Pydantic / UI
-        cat = raw.category if raw.category in ["DREI", "CNAE", "Capital", "Governança"] else "DREI"
+        valid_cats = ["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"]
+        cat = raw.category if raw.category in valid_cats else "DREI"
 
         issue = Issue(
             id=f"issue_{raw_issues.index(raw) + 1}",

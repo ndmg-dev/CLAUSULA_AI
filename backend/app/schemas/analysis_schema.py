@@ -15,7 +15,7 @@ class Issue(BaseModel):
     severity: Literal["Critical", "Mild"] = Field(description="Classificação exata. 'Critical' para riscos de alta monta financeira ou compliance; 'Mild' para inconsistências documentais ou erros menores.")
     clause_reference: str = Field(description="Referência direta ao número da cláusula ou seção original onde a anomalia reside. Ex: 'Cláusula Oitava'.")
     bounding_box: Optional[BoundingBox] = Field(default=None, description="Coordenadas espaciais providas pelo sistema OCR para alinhar com a UI de highlights.")
-    category: Literal["DREI", "CNAE", "Capital", "Governança"] = Field(default="DREI", description="Categoria do insight para mapeamento visual")
+    category: Literal["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"] = Field(default="DREI", description="Categoria do insight para mapeamento visual")
     suggested_fix: Optional[str] = Field(default=None, description="Texto sugerido pela IA para inserir ou substituir no documento original.")
     is_omission: bool = Field(default=False, description="Verdadeiro quando a cláusula não existe de fato.")
 
