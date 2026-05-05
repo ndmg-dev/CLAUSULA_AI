@@ -134,10 +134,16 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
     
     chain = prompt | get_llm(task="analyze").with_structured_output(RawIssuesExtraction)
     try:
-        result = chain.invoke({"text": text[:90000]})
+        text_for_llm = text[:120000]
+        if len(text) > 120000:
+            logger.warning(f"DetectIssuesNode: texto truncado de {len(text)} para 120000 chars ({len(text) - 120000} chars perdidos)")
+        result = chain.invoke({"text": text_for_llm})
+        logger.info(f"DetectIssuesNode: {len(result.issues)} issues detectadas")
         return {"raw_issues": result.issues}
     except Exception as e:
         logger.error(f"Erro Crítico - DetectIssuesNode: {e}")
+        import traceback
+        traceback.print_exc()
         return {"raw_issues": []}
 
 def classify_issues_node(state: WorkflowState) -> WorkflowState:
@@ -214,14 +220,25 @@ def generate_summary_node(state: WorkflowState) -> WorkflowState:
 
 def calculate_score_node(state: WorkflowState) -> WorkflowState:
     issues = state.get("issues", [])
+    summary = state["summary"]
+    
+    # Score baseado nos issues detectados
     score = 100
     for issue in issues:
         score -= 15 if issue.severity == "Critical" else 4
+    
+    # Garantia de consistência: se o resumo diz Medium/High mas não há issues,
+    # ajustar o score para refletir o risk_level (evita score 100 com risco Medium)
+    if summary.risk_level == "High" and score > 50:
+        score = min(score, 45)
+    elif summary.risk_level == "Medium" and score > 80:
+        score = min(score, 72)
+    
     score = max(0, min(100, score))
     
     final_result = AnalysisResult(
         document_health_score=score,
-        summary=state["summary"],
+        summary=summary,
         issues=state["issues"],
         # Prioriza o texto limpo da Lavanderia, cai para o raw se falhar
         original_text=state.get("cleaned_text") or state.get("document_context", {}).get("clean_text_for_llm", "")
