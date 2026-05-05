@@ -125,6 +125,9 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
             "  NUNCA invente coordenadas ou aponte para outro trecho quando a cláusula está faltando.\n"
             "  Exemplos de omissão: 'Ausência de cláusula de foro', 'Falta de declaração de desimpedimento'.\n"
             "  Nestes casos, paragraph_id DEVE ser null.\n\n"
+            "LIMITE DE ISSUES: Retorne no MÁXIMO 25 issues, priorizando as mais graves (Critical antes de Mild).\n"
+            "Para erros ortográficos repetitivos (ex: mesmo tipo de erro em vários endereços), agrupe-os em uma única issue.\n"
+            "O campo suggested_fix deve ser CONCISO (máximo 500 caracteres por fix).\n\n"
             "LEMBRETE FINAL: Você está analisando o DOCUMENTO COMPLETO. As cláusulas finais (Vigésima Oitava,\n"
             "Vigésima Nona, Trigésima, etc.) frequentemente contêm itens obrigatórios como desimpedimento e foro.\n"
             "NÃO as ignore."
@@ -141,9 +144,20 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
         logger.info(f"DetectIssuesNode: {len(result.issues)} issues detectadas")
         return {"raw_issues": result.issues}
     except Exception as e:
-        logger.error(f"Erro Crítico - DetectIssuesNode: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Erro no structured output - tentando fallback JSON: {e}")
+        # Fallback: tenta extrair o JSON bruto da mensagem de erro
+        try:
+            import json, re
+            error_str = str(e)
+            # Procura pelo JSON dentro da mensagem de erro
+            json_match = re.search(r'\{"issues"\s*:\s*\[.*\]\}', error_str, re.DOTALL)
+            if json_match:
+                raw_json = json.loads(json_match.group())
+                parsed = RawIssuesExtraction(**raw_json)
+                logger.info(f"DetectIssuesNode (fallback): {len(parsed.issues)} issues recuperadas do JSON bruto")
+                return {"raw_issues": parsed.issues}
+        except Exception as fallback_err:
+            logger.error(f"Fallback JSON também falhou: {fallback_err}")
         return {"raw_issues": []}
 
 def classify_issues_node(state: WorkflowState) -> WorkflowState:
