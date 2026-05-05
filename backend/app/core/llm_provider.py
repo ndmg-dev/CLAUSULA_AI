@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # ================================================================
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL_MINI = os.getenv("OPENAI_MODEL_MINI", "gpt-4o-mini")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
 OLLAMA_MODEL_LIGHT = os.getenv("OLLAMA_MODEL_LIGHT", "llama3.1:8b")
 OLLAMA_MODEL_HEAVY = os.getenv("OLLAMA_MODEL_HEAVY", "qwen2.5:14b")
@@ -42,10 +43,10 @@ TASK_TEMPERATURES = {
     "chat": 0.7,
 }
 
-def _get_openai_llm(temperature: float = 0):
+def _get_openai_llm(temperature: float = 0, model: str = None):
     """Instancia ChatOpenAI. Importação lazy para não quebrar se a key não existir."""
     from langchain_openai import ChatOpenAI
-    return ChatOpenAI(model=OPENAI_MODEL, temperature=temperature)
+    return ChatOpenAI(model=model or OPENAI_MODEL, temperature=temperature)
 
 def _get_ollama_llm(model: str, temperature: float = 0):
     """Instancia ChatOllama. Importação lazy para não quebrar se Ollama não estiver instalado."""
@@ -80,8 +81,12 @@ def get_llm(task: str = "general"):
     """
     temperature = TASK_TEMPERATURES.get(task, 0)
     
-    # ─── MODO OPENAI (padrão) ─────────────────────────────────
+    # ─── MODO OPENAI (padrão) ─────────────────────────────
     if LLM_PROVIDER == "openai":
+        # Tarefas leves usam gpt-4o-mini (2x mais rápido, 15x mais barato)
+        if task in ("clean", "summary"):
+            logger.debug(f"[LLMProvider] task={task} → OpenAI ({OPENAI_MODEL_MINI}) [fast]")
+            return _get_openai_llm(temperature, model=OPENAI_MODEL_MINI)
         logger.debug(f"[LLMProvider] task={task} → OpenAI ({OPENAI_MODEL})")
         return _get_openai_llm(temperature)
     

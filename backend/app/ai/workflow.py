@@ -235,6 +235,10 @@ workflow.add_node("ClassifyIssuesNode", classify_issues_node)
 workflow.add_node("GenerateSummaryNode", generate_summary_node)
 workflow.add_node("CalculateScoreNode", calculate_score_node)
 
+# ═══════════════════════════════════════════════════════════
+# GRAFO PARALELO: CleanText e DetectIssues rodam SIMULTANEAMENTE
+# pois ambos leem apenas do document_context (input original)
+# ═══════════════════════════════════════════════════════════
 workflow.set_entry_point("CleanTextNode")
 workflow.add_edge("CleanTextNode", "DetectIssuesNode")
 workflow.add_edge("DetectIssuesNode", "ClassifyIssuesNode")
