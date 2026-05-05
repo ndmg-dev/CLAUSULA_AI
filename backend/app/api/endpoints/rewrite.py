@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from app.ai.workflow import llm
+from app.core.llm_provider import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Optional
 
@@ -33,7 +33,7 @@ async def rewrite_clause(payload: RewriteRequest):
         ("user", "Título do Problema Detectado: {issue_title}\nDescrição/Exigência: {issue_description}\n\nCláusula Original (Problemática):\n{original_text}")
     ])
     
-    chain = prompt | llm.with_structured_output(RewrittenClause)
+    chain = prompt | get_llm(task="analyze").with_structured_output(RewrittenClause)
     
     try:
         result = await chain.ainvoke({
