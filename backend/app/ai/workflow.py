@@ -137,9 +137,24 @@ def detect_issues_node(state: WorkflowState) -> WorkflowState:
     
     chain = prompt | get_llm(task="analyze").with_structured_output(RawIssuesExtraction)
     try:
-        text_for_llm = text[:120000]
-        if len(text) > 120000:
-            logger.warning(f"DetectIssuesNode: texto truncado de {len(text)} para 120000 chars ({len(text) - 120000} chars perdidos)")
+        # Truncamento INTELIGENTE: preserva início + fim do documento
+        # Cláusulas obrigatórias (foro, desimpedimento) ficam nas últimas páginas
+        MAX_CHARS = 120000
+        if len(text) > MAX_CHARS:
+            # Mantém 85% do início + 15% do final (onde ficam cláusulas obrigatórias)
+            head_size = int(MAX_CHARS * 0.85)
+            tail_size = MAX_CHARS - head_size
+            text_for_llm = (
+                text[:head_size] + 
+                "\n\n[... TRECHO INTERMEDIÁRIO OMITIDO POR LIMITE DE TAMANHO ...]\n\n" + 
+                text[-tail_size:]
+            )
+            logger.warning(
+                f"DetectIssuesNode: texto truncado de {len(text)} para ~{MAX_CHARS} chars "
+                f"(head={head_size}, tail={tail_size}, {len(text) - MAX_CHARS} chars do meio omitidos)"
+            )
+        else:
+            text_for_llm = text
         result = chain.invoke({"text": text_for_llm})
         logger.info(f"DetectIssuesNode: {len(result.issues)} issues detectadas")
         return {"raw_issues": result.issues}
