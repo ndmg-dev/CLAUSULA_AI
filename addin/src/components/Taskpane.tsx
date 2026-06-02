@@ -42,30 +42,37 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
   const isCritical = issue.severity === 'Critical';
 
   const handleApply = async () => {
-    if (!issue.suggested_fix && !issue.spelling_corrections?.length) return;
     setApplying(true);
     try {
-      // ORTOGRAFIA EM LOTE: Aplica todas as correções de uma vez
-      if (issue.category === 'Ortografia' && issue.spelling_corrections?.length) {
-        const result = await applySpellingCorrections(issue.spelling_corrections);
-        console.log(`[Taskpane] ${result.applied} correções ortográficas aplicadas de ${result.total} pares`);
-        setCorrectionCount(result.applied);
-        setApplied(true);
-        setTimeout(() => { setApplied(false); setCorrectionCount(0); }, 4000);
-        return;
+      // ============================================================
+      // ORTOGRAFIA EM LOTE: Caminho exclusivo para correções ortográficas
+      // NUNCA cai no fallback de inserção genérica
+      // ============================================================
+      if (issue.category === 'Ortografia') {
+        if (issue.spelling_corrections?.length) {
+          const result = await applySpellingCorrections(issue.spelling_corrections);
+          console.log(`[Taskpane] ${result.applied} correções ortográficas aplicadas de ${result.total} pares`);
+          setCorrectionCount(result.applied);
+          setApplied(true);
+          setTimeout(() => { setApplied(false); setCorrectionCount(0); }, 4000);
+        } else {
+          console.warn('[Taskpane] Issue de ortografia sem spelling_corrections — nada a aplicar');
+        }
+        return; // SEMPRE retorna aqui para ortografia, nunca cai no fallback
       }
 
+      // ============================================================
+      // FLUXO PADRÃO: Correção/Omissão de cláusulas
+      // ============================================================
       if (!issue.suggested_fix) return;
       let success = false;
       
       if (issue.is_omission) {
-        // OMISSÃO: Insere cláusula nova na posição correta do contrato
         success = await insertNewClauseAtPosition(
           issue.title,
           issue.suggested_fix
         );
       } else {
-        // CORREÇÃO: Substitui o trecho problemático no local exato
         success = await replaceClauseIntelligently(
           issue.clause_reference,
           issue.suggested_fix
@@ -73,7 +80,6 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
       }
       
       if (!success) {
-        // Último fallback: insere no cursor
         await applySuggestion(issue.suggested_fix);
       }
       
@@ -201,40 +207,46 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
               )}
 
               {/* Sugestão da IA (ou Correções Ortográficas em Lote) */}
-              {(issue.suggested_fix || (issue.category === 'Ortografia' && issue.spelling_corrections?.length)) && (
+              {(issue.suggested_fix || issue.category === 'Ortografia') && (
                 <div className="bg-white rounded border border-brand-100 overflow-hidden">
                   <div className="px-2.5 py-1.5 bg-brand-50 border-b border-brand-100 flex items-center gap-1.5">
                     <Sparkles className="w-3 h-3 text-brand-600" />
                     <span className="text-2xs font-semibold text-brand-700 uppercase tracking-wider">Sugestão IA</span>
                   </div>
                   <p className="px-2.5 py-2 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
-                    {issue.category === 'Ortografia' && issue.spelling_corrections?.length
-                      ? `Revisar o documento para corrigir erros de ortografia e formatação, garantindo espaços adequados entre palavras e pontuação.`
+                    {issue.category === 'Ortografia'
+                      ? issue.description
                       : issue.suggested_fix
                     }
                   </p>
                   <div className="px-2.5 py-2 border-t border-slate-100">
-                    <button
-                      onClick={handleApply}
-                      disabled={applying || applied}
-                      className={`w-full py-2 rounded text-xs font-semibold transition-all flex items-center justify-center gap-2 ${
-                        applied
-                          ? 'bg-health-good text-white'
-                          : 'bg-brand-600 hover:bg-brand-700 text-white shadow-sm'
-                      } disabled:opacity-60`}
-                    >
-                      {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                      {applied && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {applying 
-                        ? 'Corrigindo...' 
-                        : applied 
-                          ? (issue.category === 'Ortografia' && correctionCount > 0 
-                              ? `${correctionCount} Erros Corrigidos!` 
-                              : issue.is_omission ? 'Cláusula Inserida!' : 'Cláusula Substituída!')
-                          : (issue.category === 'Ortografia' && issue.spelling_corrections?.length 
-                              ? 'Corrigir Todos os Erros' 
-                              : issue.is_omission ? 'Inserir Cláusula no Contrato' : 'Corrigir Automaticamente')}
-                    </button>
+                    {issue.category === 'Ortografia' && !issue.spelling_corrections?.length ? (
+                      <div className="w-full py-2 rounded text-xs font-medium text-center text-slate-500 bg-slate-100 border border-slate-200">
+                        Correções não disponíveis — Revise manualmente
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleApply}
+                        disabled={applying || applied}
+                        className={`w-full py-2 rounded text-xs font-semibold transition-all flex items-center justify-center gap-2 ${
+                          applied
+                            ? 'bg-health-good text-white'
+                            : 'bg-brand-600 hover:bg-brand-700 text-white shadow-sm'
+                        } disabled:opacity-60`}
+                      >
+                        {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                        {applied && <CheckCircle2 className="w-3.5 h-3.5" />}
+                        {applying 
+                          ? 'Corrigindo...' 
+                          : applied 
+                            ? (issue.category === 'Ortografia' && correctionCount > 0 
+                                ? `${correctionCount} Erros Corrigidos!` 
+                                : issue.is_omission ? 'Cláusula Inserida!' : 'Cláusula Substituída!')
+                            : (issue.category === 'Ortografia' && issue.spelling_corrections?.length 
+                                ? 'Corrigir Todos os Erros' 
+                                : issue.is_omission ? 'Inserir Cláusula no Contrato' : 'Corrigir Automaticamente')}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

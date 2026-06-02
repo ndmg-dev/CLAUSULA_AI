@@ -27,7 +27,7 @@ class UnclassifiedIssue(BaseModel):
     paragraph_id: Optional[str] = Field(default=None, description="ID exato do parágrafo (ex: 'P12'). DEVE ser null se for omissão.")
     is_omission: bool = Field(default=False, description="True se a cláusula NÃO EXISTE no documento.")
     category: str = Field(description="Literal: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
-    suggested_fix: Optional[str] = Field(default=None, description="Texto FINAL da cláusula corrigida — NUNCA instruções. Este texto será inserido diretamente no documento Word pelo botão 'Corrigir Automaticamente'. Deve ser o texto jurídico completo da cláusula reescrita, pronto para uso. Exemplo correto: 'CLÁUSULA DÉCIMA: O exercício social iniciar-se-á em 1º de janeiro e encerrar-se-á em 31 de dezembro de cada ano.' Exemplo ERRADO: 'Revisar a cláusula para incluir o exercício social.' Para category='Ortografia', preencher com 'Correções ortográficas a serem aplicadas automaticamente.' (o campo spelling_corrections conterá os detalhes).")
+    suggested_fix: Optional[str] = Field(default=None, description="Texto FINAL da cláusula corrigida — NUNCA instruções. Este texto será inserido diretamente no documento Word pelo botão 'Corrigir Automaticamente'. Deve ser o texto jurídico completo da cláusula reescrita, pronto para uso. Para category='Ortografia', este campo DEVE ser null (as correções ficam em spelling_corrections). Exemplo correto: 'CLÁUSULA DÉCIMA: O exercício social iniciar-se-á em 1º de janeiro e encerrar-se-á em 31 de dezembro de cada ano.' Exemplo ERRADO: 'Revisar a cláusula para incluir o exercício social.'")
     spelling_corrections: Optional[List[SpellingCorrectionItem]] = Field(default=None, description="OBRIGATÓRIO quando category='Ortografia'. Lista de TODOS os pares errado→correto encontrados no documento. Cada 'wrong' deve ser o trecho EXATO como aparece no texto. Exemplo: [{'wrong': 'contrato socia', 'correct': 'contrato social'}, {'wrong': 'adminsitração', 'correct': 'administração'}]")
 
 class FullAnalysisResult(BaseModel):
@@ -141,8 +141,14 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
             "  CORRETO: 'CLÁUSULA DÉCIMA PRIMEIRA: O exercício social terá início em 1º de janeiro...'\n"
             "  ERRADO: 'Revisar a cláusula para incluir...'\n"
             "  ERRADO: 'Incluir uma cláusula específica definindo...'\n"
+            "- Para category='Ortografia': suggested_fix DEVE ser null. As correções vão EXCLUSIVAMENTE em spelling_corrections.\n"
             "- executive_summary: Parecer em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre eles.\n"
             "- risk_level: 'Low' se o documento está adequado, 'Medium' se há ajustes menores, 'High' se há Critical.\n\n"
+            "REGRA DE CONSISTÊNCIA ABSOLUTA:\n"
+            "- Cada problema mencionado no executive_summary DEVE ter uma issue correspondente na lista de issues.\n"
+            "- Se o executive_summary menciona exercício social, DEVE existir uma issue sobre exercício social.\n"
+            "- Se o executive_summary menciona distribuição de lucros, DEVE existir uma issue sobre distribuição de lucros.\n"
+            "- NÃO mencione no resumo problemas que não tenham issue correspondente.\n\n"
             
             + structural_block
         )),
@@ -266,11 +272,22 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
 
         # Converte spelling_corrections do schema LLM para o schema final
         final_spelling_corrections = None
-        if cat == "Ortografia" and raw.spelling_corrections:
-            final_spelling_corrections = [
-                SpellingCorrection(wrong=sc.wrong, correct=sc.correct)
-                for sc in raw.spelling_corrections
-            ]
+        final_suggested_fix = raw.suggested_fix
+        
+        if cat == "Ortografia":
+            # Converte as correções ortográficas
+            if raw.spelling_corrections:
+                final_spelling_corrections = [
+                    SpellingCorrection(wrong=sc.wrong, correct=sc.correct)
+                    for sc in raw.spelling_corrections
+                ]
+                logger.info(f"Ortografia: {len(final_spelling_corrections)} correções individuais mapeadas")
+            else:
+                logger.warning(f"Issue Ortografia '{raw.title}' SEM spelling_corrections — LLM não preencheu o campo")
+            
+            # SANITIZAÇÃO: Nunca deixar suggested_fix com texto genérico/instrução para ortografia
+            # pois ele seria inserido literalmente no Word como fallback
+            final_suggested_fix = None
 
         issue = Issue(
             id=f"issue_{len(final_issues) + 1}",
@@ -280,7 +297,7 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
             clause_reference=raw.clause_reference,
             bounding_box=bbox_data,
             category=cat,
-            suggested_fix=raw.suggested_fix,
+            suggested_fix=final_suggested_fix,
             is_omission=raw.is_omission,
             spelling_corrections=final_spelling_corrections
         )
