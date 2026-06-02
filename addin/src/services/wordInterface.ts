@@ -149,6 +149,51 @@ export async function applySpellingCorrections(
 }
 
 /**
+ * Destaca TODOS os erros ortográficos no documento com highlight amarelo.
+ * Busca cada 'wrong' no documento e aplica highlight, depois scrolla até o primeiro.
+ * 
+ * @param corrections — Array de pares { wrong: string, correct: string }
+ * @returns Número de trechos destacados
+ */
+export async function highlightSpellingErrors(
+  corrections: Array<{ wrong: string; correct: string }>
+): Promise<number> {
+  return Word.run(async (context: any) => {
+    let highlightedCount = 0;
+    let firstRange: any = null;
+    
+    for (const { wrong } of corrections) {
+      const results = context.document.body.search(wrong, {
+        matchCase: false,
+        matchWholeWord: false
+      });
+      results.load('items');
+      await context.sync();
+      
+      for (const item of results.items) {
+        item.font.highlightColor = 'Yellow';
+        highlightedCount++;
+        if (!firstRange) {
+          firstRange = item;
+        }
+      }
+    }
+    
+    // Scroll até o primeiro erro para o usuário ver
+    if (firstRange) {
+      firstRange.select();
+    }
+    
+    await context.sync();
+    console.log(`[wordInterface] ${highlightedCount} erros ortográficos destacados no documento`);
+    return highlightedCount;
+  }).catch((e: any) => {
+    console.error('[wordInterface] Erro ao destacar erros ortográficos', e);
+    return 0;
+  });
+}
+
+/**
  * Gera o ordinal feminino em português (PRIMEIRA, SEGUNDA, ... DÉCIMA PRIMEIRA, etc.)
  * Usado para numerar cláusulas de contrato automaticamente.
  */

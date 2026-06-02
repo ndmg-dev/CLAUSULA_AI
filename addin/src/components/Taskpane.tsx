@@ -7,7 +7,7 @@ import {
   SpellCheck, AlertCircle
 } from 'lucide-react';
 import { useAuditStore, MOCK_RESULT, type AuditIssue } from '../store/useAuditStore';
-import { getContractText, applySuggestion, highlightClause, focusClause, insertCommentToClause, getWordDocumentAsBase64, replaceClauseIntelligently, insertNewClauseAtPosition, applySpellingCorrections } from '../services/wordInterface';
+import { getContractText, applySuggestion, highlightClause, focusClause, insertCommentToClause, getWordDocumentAsBase64, replaceClauseIntelligently, insertNewClauseAtPosition, applySpellingCorrections, highlightSpellingErrors } from '../services/wordInterface';
 import axios from 'axios';
 import { TemplatesTab } from './TemplatesTab';
 import { EsignTab } from './EsignTab';
@@ -160,7 +160,7 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
               </p>
 
               {/* Referência Original e Comentário */}
-              {!issue.is_omission && (
+              {!issue.is_omission && issue.category !== 'Ortografia' && (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleLocate}
@@ -197,6 +197,27 @@ function IssueCard({ issue }: { issue: AuditIssue }) {
                     {commenting ? <Loader2 className="w-3 h-3 animate-spin" /> : commented ? <CheckCircle2 className="w-3 h-3" /> : <MessageSquare className="w-3 h-3" />}
                   </button>
                 </div>
+              )}
+
+              {/* Botão Destacar Erros — exclusivo para ortografia */}
+              {issue.category === 'Ortografia' && issue.spelling_corrections?.length && (
+                <button
+                  onClick={async () => {
+                    setHighlighting(true);
+                    try {
+                      await highlightSpellingErrors(issue.spelling_corrections!);
+                    } catch (e) {
+                      console.error('[Taskpane] Falha ao destacar erros:', e);
+                    } finally {
+                      setHighlighting(false);
+                    }
+                  }}
+                  disabled={highlighting}
+                  className="w-full px-2.5 py-2 rounded border border-purple-200 bg-purple-50 text-2xs font-semibold uppercase tracking-wider flex items-center gap-2 transition-colors text-purple-800 hover:bg-purple-100"
+                >
+                  {highlighting ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileSearch className="w-3 h-3" />}
+                  Destacar Erros no Documento
+                </button>
               )}
 
               {issue.is_omission && (
