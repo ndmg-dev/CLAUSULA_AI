@@ -4,6 +4,11 @@ import { create } from 'zustand';
 // TIPAGENS DO DOMÍNIO SOCIETÁRIO
 // ================================================================
 
+export interface SpellingCorrection {
+  wrong: string;
+  correct: string;
+}
+
 export interface AuditIssue {
   id: string;
   title: string;
@@ -11,10 +16,12 @@ export interface AuditIssue {
   severity: 'Critical' | 'Mild';
   clause_reference: string;
   /** Categoria contábil para agrupamento visual */
-  category: 'DREI' | 'CNAE' | 'Capital' | 'Governança';
+  category: 'DREI' | 'CNAE' | 'Capital' | 'Governança' | 'Ortografia' | 'Inconsistência';
   /** Sugestão redigida pela IA para correção da cláusula */
   suggested_fix: string | null;
   is_omission: boolean;
+  /** Lista de correções ortográficas para aplicação em lote (só para category='Ortografia') */
+  spelling_corrections?: SpellingCorrection[] | null;
 }
 
 export interface AuditSummary {

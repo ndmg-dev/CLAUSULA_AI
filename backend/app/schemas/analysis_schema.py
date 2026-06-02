@@ -8,6 +8,11 @@ class BoundingBox(BaseModel):
     x1: float = Field(description="Borda direita normalizada (0.0 até 1.0)")
     y1: float = Field(description="Borda inferior normalizada (0.0 até 1.0)")
 
+class SpellingCorrection(BaseModel):
+    """Par de busca/substituição para correção ortográfica individual."""
+    wrong: str = Field(description="Texto errado exatamente como aparece no documento")
+    correct: str = Field(description="Texto corrigido")
+
 class Issue(BaseModel):
     id: str = Field(description="Identificador único da anomalia, gerado sequencialmente ex: 'issue_1'")
     title: str = Field(description="Título curto, direto e claro resumindo a anomalia identificada no contrato.")
@@ -18,6 +23,7 @@ class Issue(BaseModel):
     category: Literal["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"] = Field(default="DREI", description="Categoria do insight para mapeamento visual")
     suggested_fix: Optional[str] = Field(default=None, description="Texto sugerido pela IA para inserir ou substituir no documento original.")
     is_omission: bool = Field(default=False, description="Verdadeiro quando a cláusula não existe de fato.")
+    spelling_corrections: Optional[List[SpellingCorrection]] = Field(default=None, description="Lista de correções ortográficas para aplicação em lote. Só usado quando category='Ortografia'.")
 
 class AnalysisSummary(BaseModel):
     executive_summary: str = Field(description="Resumo executivo de nível sênior documentando de forma enxuta o status da sanidade do documento após revisão.")

@@ -5,7 +5,16 @@ import remarkGfm from 'remark-gfm';
 import { applySuggestion, getContractText } from '../services/wordInterface';
 import { useChatStore, type Message } from '../store/useChatStore';
 
-const SYSTEM_PROMPT = `Você é o Cláusula AI, um Analista Societário Sênior especialista em direito empresarial brasileiro, regras do DREI, Junta Comercial e enquadramento CNAE. Suas respostas devem ser diretas, técnicas e formatadas prontas para uso em contratos sociais. Evite jargões desnecessários, foque na aprovação do registro e na proteção patrimonial dos sócios.`;
+const SYSTEM_PROMPT = `Você é o Cláusula AI, um Analista Societário Sênior especialista em direito empresarial brasileiro, regras do DREI, Junta Comercial e enquadramento CNAE.
+
+REGRAS FUNDAMENTAIS:
+1. Você tem acesso ao contrato social que o usuário está editando neste momento no Microsoft Word. Esse documento é sua FONTE PRIMÁRIA DE VERDADE.
+2. Quando o usuário perguntar sobre o contrato, cláusulas, sócios, capital, ou qualquer aspecto do documento, SEMPRE consulte o texto do contrato fornecido antes de responder.
+3. NUNCA invente informações que não estejam no documento. Se algo não consta no contrato, diga explicitamente: "O contrato atual não menciona [X]".
+4. Ao redigir sugestões de cláusulas, considere o contexto completo do documento: número de cláusulas existentes, nomes dos sócios, capital social, objeto social, etc.
+5. Suas respostas devem ser diretas, técnicas e formatadas prontas para uso em contratos sociais.
+6. Foque na aprovação do registro na Junta Comercial e na proteção patrimonial dos sócios.
+7. Ao sugerir nova cláusula, numere-a sequencialmente após a última cláusula existente no documento.`;
 
 export function CopilotChat() {
   const { messages, addMessage, updateMessage, setMessages } = useChatStore();
@@ -46,8 +55,13 @@ export function CopilotChat() {
     });
 
     try {
-      // Captura o texto atual do documento Word para dar "visão" à IA
-      const docText = await getContractText();
+      // Captura o texto ATUAL do documento Word para dar "visão" completa à IA
+      let docText = '';
+      try {
+        docText = await getContractText();
+      } catch (docErr) {
+        console.warn('[CopilotChat] Não foi possível ler o documento:', docErr);
+      }
 
       // Monta o payload com o histórico, inserindo o System Prompt no início
       const conversationHistory = [
@@ -56,7 +70,7 @@ export function CopilotChat() {
         { role: 'user', content: userMessage.content }
       ].filter(m => m.role !== 'system' || m.content === SYSTEM_PROMPT);
 
-      // Chamada para a API
+      // Chamada para a API — envia o documento completo como contexto
       const baseUrl = import.meta.env.VITE_API_URL || 'https://api.clausulaai.nucleodigital.cloud';
       const response = await fetch(`${baseUrl}/api/chat/stream`, {
         method: 'POST',
@@ -65,7 +79,7 @@ export function CopilotChat() {
         },
         body: JSON.stringify({ 
           messages: conversationHistory,
-          document_context: docText // Injeção de contexto dinâmico
+          document_context: docText || null
         }),
       });
 

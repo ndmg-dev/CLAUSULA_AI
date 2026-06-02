@@ -22,10 +22,26 @@ async def chat_stream(payload: ChatPayload):
             content = msg.get("content", "")
             
             if role == "system":
-                # Injetamos o contexto do documento no system prompt se ele existir
+                # Injetamos o contexto do documento no system prompt com formatação clara
                 final_content = content
-                if payload.document_context:
-                    final_content += f"\n\n[CONTRATO ATUAL PARA ANÁLISE]:\n{payload.document_context}"
+                if payload.document_context and payload.document_context.strip():
+                    doc_text = payload.document_context.strip()
+                    # Trunca documentos muito longos para não estourar limite de tokens
+                    if len(doc_text) > 80000:
+                        doc_text = doc_text[:60000] + "\n\n[... TRECHO INTERMEDIÁRIO OMITIDO POR LIMITE ...]\n\n" + doc_text[-15000:]
+                    
+                    final_content += (
+                        "\n\n"
+                        "══════════════════════════════════════════════════════\n"
+                        "  DOCUMENTO WORD ATIVO — FONTE PRIMÁRIA DE VERDADE\n"
+                        "══════════════════════════════════════════════════════\n"
+                        "O texto abaixo é o contrato social que o usuário está editando AGORA no Microsoft Word.\n"
+                        "Use este documento como base para TODAS as suas respostas.\n"
+                        "Se o usuário perguntar sobre cláusulas, sócios, capital, objeto social, etc., \n"
+                        "consulte ESTE texto — não invente informações.\n\n"
+                        f"{doc_text}\n"
+                        "══════════════════════════════════════════════════════\n"
+                    )
                 langchain_messages.append(SystemMessage(content=final_content))
             elif role == "assistant":
                 langchain_messages.append(AIMessage(content=content))

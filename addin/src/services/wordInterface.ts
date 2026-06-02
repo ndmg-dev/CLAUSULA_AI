@@ -113,20 +113,119 @@ export async function replaceClauseIntelligently(searchText: string, newText: st
 }
 
 /**
+ * Aplica TODAS as correções ortográficas de uma vez em uma única transação Word.
+ * Cada par { wrong, correct } é buscado globalmente no documento e substituído.
+ * 
+ * @param corrections — Array de pares { wrong: string, correct: string }
+ * @returns Objeto com total de pares processados e quantos trechos foram substituídos
+ */
+export async function applySpellingCorrections(
+  corrections: Array<{ wrong: string; correct: string }>
+): Promise<{ applied: number; total: number }> {
+  return Word.run(async (context: any) => {
+    let appliedCount = 0;
+    
+    for (const { wrong, correct } of corrections) {
+      const results = context.document.body.search(wrong, {
+        matchCase: false,
+        matchWholeWord: false
+      });
+      results.load('items');
+      await context.sync();
+      
+      for (const item of results.items) {
+        item.insertText(correct, 'Replace');
+        appliedCount++;
+      }
+    }
+    
+    await context.sync();
+    console.log(`[wordInterface] Correções ortográficas aplicadas: ${appliedCount} substituições de ${corrections.length} pares`);
+    return { applied: appliedCount, total: corrections.length };
+  }).catch((e: any) => {
+    console.error('[wordInterface] Erro ao aplicar correções ortográficas em lote', e);
+    return { applied: 0, total: corrections.length };
+  });
+}
+
+/**
+ * Gera o ordinal feminino em português (PRIMEIRA, SEGUNDA, ... DÉCIMA PRIMEIRA, etc.)
+ * Usado para numerar cláusulas de contrato automaticamente.
+ */
+function getPortugueseOrdinal(n: number): string {
+  const units = ['', 'PRIMEIRA', 'SEGUNDA', 'TERCEIRA', 'QUARTA', 'QUINTA',
+                 'SEXTA', 'SÉTIMA', 'OITAVA', 'NONA'];
+  const tens  = ['', 'DÉCIMA', 'VIGÉSIMA', 'TRIGÉSIMA', 'QUADRAGÉSIMA'];
+
+  if (n <= 0) return '';
+  if (n < 10) return units[n];
+
+  const ten = Math.floor(n / 10);
+  const unit = n % 10;
+
+  if (ten >= tens.length) return `${n}ª`; // fallback numérico para contratos muito longos
+  if (unit === 0) return tens[ten];
+  return `${tens[ten]} ${units[unit]}`;
+}
+
+/**
+ * Conta quantas cláusulas existem no documento baseado em parágrafos 
+ * que começam com "Cláusula" seguido de um ordinal (padrão de contratos).
+ */
+function countClauseHeaders(paragraphs: any[]): number {
+  let count = 0;
+  const clausePattern = /^cl[áa]usula\s/i;
+  for (const p of paragraphs) {
+    const text = (p.text || '').trim();
+    if (clausePattern.test(text)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Substitui a numeração ordinal de cláusula no texto pelo ordinal correto.
+ * Ex: "CLÁUSULA DÉCIMA SEGUNDA:" → "CLÁUSULA DÉCIMA PRIMEIRA:" 
+ */
+function fixClauseNumbering(text: string, correctOrdinal: string): string {
+  // Regex que captura "CLÁUSULA <ORDINAL>:" ou "CLÁUSULA <ORDINAL> -" ou "CLÁUSULA <ORDINAL> —"
+  // O ordinal é qualquer sequência de palavras em maiúsculas entre "CLÁUSULA" e o separador
+  const pattern = /(CL[ÁA]USULA\s+)([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ\s]+?)(\s*[-—:])/i;
+  const match = text.match(pattern);
+  
+  if (match) {
+    return text.replace(pattern, `$1${correctOrdinal}$3`);
+  }
+  return text;
+}
+
+/**
  * Insere uma cláusula nova no final do documento, após a última cláusula existente.
  * Usado para omissões (cláusulas que DEVERIAM existir mas não existem).
  * 
- * A função procura o último parágrafo significativo do documento e insere
- * logo após ele, com formatação de cabeçalho + corpo de cláusula.
+ * NUMERAÇÃO AUTOMÁTICA: Conta as cláusulas existentes no documento e renumera
+ * a cláusula sugerida pela IA para garantir sequência correta.
+ * Ex: Se o contrato tem 10 cláusulas, a nova será "DÉCIMA PRIMEIRA".
  * 
- * @param clauseTitle — Ex: "CLÁUSULA DÉCIMA PRIMEIRA - DISTRIBUIÇÃO DE LUCROS"
- * @param clauseBody — O texto completo da nova cláusula
+ * @param clauseTitle — Ex: "Omissão da cláusula de distribuição de lucros"
+ * @param clauseBody — O texto completo da nova cláusula (pode conter numeração incorreta da LLM)
  */
 export async function insertNewClauseAtPosition(clauseTitle: string, clauseBody: string): Promise<boolean> {
   return Word.run(async (context: any) => {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load('items, text');
     await context.sync();
+
+    // ===== CONTAGEM DETERMINÍSTICA DE CLÁUSULAS =====
+    const existingClauseCount = countClauseHeaders(paragraphs.items);
+    const nextClauseNumber = existingClauseCount + 1;
+    const correctOrdinal = getPortugueseOrdinal(nextClauseNumber);
+    
+    console.log(`[wordInterface] Documento tem ${existingClauseCount} cláusulas → nova será CLÁUSULA ${correctOrdinal}`);
+
+    // Corrige a numeração no texto sugerido pela IA
+    const fixedBody = fixClauseNumbering(clauseBody, correctOrdinal);
 
     // Procura de trás para frente o último parágrafo que contenha "Cláusula" 
     // para inserir logo após ele (mantendo a sequência do contrato)
@@ -152,7 +251,7 @@ export async function insertNewClauseAtPosition(clauseTitle: string, clauseBody:
     heading.font.size = 12;
     heading.alignment = 'Centered';
     
-    const body = heading.insertParagraph(clauseBody, 'After');
+    const body = heading.insertParagraph(fixedBody, 'After');
     body.font.bold = false;
     body.font.size = 11;
     body.alignment = 'Justified';
@@ -161,7 +260,7 @@ export async function insertNewClauseAtPosition(clauseTitle: string, clauseBody:
     body.select();
     
     await context.sync();
-    console.log(`[wordInterface] Nova cláusula inserida: "${clauseTitle}" (${clauseBody.length} chars)`);
+    console.log(`[wordInterface] Nova cláusula inserida: "CLÁUSULA ${correctOrdinal}" (${fixedBody.length} chars)`);
     return true;
   }).catch((e: any) => {
     console.error('[wordInterface] Erro ao inserir nova cláusula', e);

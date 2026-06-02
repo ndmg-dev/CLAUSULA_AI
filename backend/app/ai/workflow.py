@@ -6,7 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 from app.core.llm_provider import get_llm
 
-from app.schemas.analysis_schema import Issue, AnalysisSummary, AnalysisResult, BoundingBox
+from app.schemas.analysis_schema import Issue, AnalysisSummary, AnalysisResult, BoundingBox, SpellingCorrection
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -14,15 +14,21 @@ logger = logging.getLogger(__name__)
 # ================================================================
 # SCHEMA UNIFICADO: Issues + Summary em UMA única resposta
 # ================================================================
+class SpellingCorrectionItem(BaseModel):
+    """Par de busca/substituição para correção ortográfica."""
+    wrong: str = Field(description="Trecho EXATO com erro, como aparece no documento (incluindo espaços e pontuação ao redor)")
+    correct: str = Field(description="Trecho corrigido que substituirá o errado")
+
 class UnclassifiedIssue(BaseModel):
     title: str = Field(description="Título curto da anomalia.")
     description: str = Field(description="Descrição técnica concisa.")
     severity: str = Field(description="'Critical' ou 'Mild'.")
-    clause_reference: str = Field(description="Referência à cláusula (ex: 'Cláusula Oitava').")
+    clause_reference: str = Field(description="Referência à cláusula (ex: 'Cláusula Oitava'). Para ortografia use 'Geral'.")
     paragraph_id: Optional[str] = Field(default=None, description="ID exato do parágrafo (ex: 'P12'). DEVE ser null se for omissão.")
     is_omission: bool = Field(default=False, description="True se a cláusula NÃO EXISTE no documento.")
     category: str = Field(description="Literal: 'DREI', 'CNAE', 'Capital', 'Governança', 'Ortografia', ou 'Inconsistência'.")
-    suggested_fix: Optional[str] = Field(default=None, description="Texto FINAL da cláusula corrigida — NUNCA instruções. Este texto será inserido diretamente no documento Word pelo botão 'Corrigir Automaticamente'. Deve ser o texto jurídico completo da cláusula reescrita, pronto para uso. Exemplo correto: 'CLÁUSULA DÉCIMA: O exercício social iniciar-se-á em 1º de janeiro e encerrar-se-á em 31 de dezembro de cada ano.' Exemplo ERRADO: 'Revisar a cláusula para incluir o exercício social.'")
+    suggested_fix: Optional[str] = Field(default=None, description="Texto FINAL da cláusula corrigida — NUNCA instruções. Este texto será inserido diretamente no documento Word pelo botão 'Corrigir Automaticamente'. Deve ser o texto jurídico completo da cláusula reescrita, pronto para uso. Exemplo correto: 'CLÁUSULA DÉCIMA: O exercício social iniciar-se-á em 1º de janeiro e encerrar-se-á em 31 de dezembro de cada ano.' Exemplo ERRADO: 'Revisar a cláusula para incluir o exercício social.' Para category='Ortografia', preencher com 'Correções ortográficas a serem aplicadas automaticamente.' (o campo spelling_corrections conterá os detalhes).")
+    spelling_corrections: Optional[List[SpellingCorrectionItem]] = Field(default=None, description="OBRIGATÓRIO quando category='Ortografia'. Lista de TODOS os pares errado→correto encontrados no documento. Cada 'wrong' deve ser o trecho EXATO como aparece no texto. Exemplo: [{'wrong': 'contrato socia', 'correct': 'contrato social'}, {'wrong': 'adminsitração', 'correct': 'administração'}]")
 
 class FullAnalysisResult(BaseModel):
     """Resposta unificada: issues + summary em uma única chamada LLM."""
@@ -113,7 +119,14 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
             "2. CNAE: Objeto social vs. enquadramento tributário.\n"
             "3. Capital: Integralização, prazos, forma de pagamento.\n"
             "4. Governança: Exercício social, balanço, distribuição de lucros.\n"
-            "5. Ortografia: Erros ortográficos, acentuação, concordância. Agrupe erros repetitivos em uma única issue.\n"
+            "5. Ortografia: Erros ortográficos, acentuação, concordância.\n"
+            "   REGRA ABSOLUTA DE ORTOGRAFIA:\n"
+            "   - Crie APENAS UMA ÚNICA issue com category='Ortografia' para TODOS os erros ortográficos do documento inteiro.\n"
+            "   - NÃO crie issues separadas para cada erro ortográfico.\n"
+            "   - Preencha OBRIGATORIAMENTE o campo 'spelling_corrections' com a lista de TODOS os pares errado→correto.\n"
+            "   - Cada 'wrong' DEVE ser o trecho EXATO como aparece no documento (copie literalmente).\n"
+            "   - Na 'description', liste TODOS os erros encontrados no formato: 'Foram encontrados N erros: 1) trecho_errado → trecho_correto; 2) ...'\n"
+            "   - Use clause_reference='Geral' para a issue de ortografia.\n"
             "6. Inconsistência: Dados contraditórios (CPF, nomes, percentuais que não somam 100%%).\n\n"
             
             "REGRAS DE SEVERIDADE (SEVERITY):\n"
@@ -121,7 +134,11 @@ def unified_analysis_node(state: WorkflowState) -> WorkflowState:
             "- 'Mild': OBRIGATÓRIO para erros de 'Ortografia', 'Falta de clareza', formatação ou melhorias de redação. NUNCA classifique problemas textuais ou ortográficos como Critical.\n"
             "- suggested_fix: OBRIGATORIAMENTE texto jurídico FINAL da cláusula corrigida.\n"
             "  Este campo será colado diretamente no documento Word.\n"
-            "  CORRETO: 'CLÁUSULA DÉCIMA SEGUNDA: O exercício social terá início em 1º de janeiro...'\n"
+            "  NUMERAÇÃO DE CLÁUSULAS OMISSAS: Conte TODAS as cláusulas existentes no documento.\n"
+            "  Se o contrato tem N cláusulas, a nova cláusula DEVE ser numerada como N+1.\n"
+            "  Exemplo: Se há 10 cláusulas (até 'Cláusula Décima'), a nova DEVE ser 'CLÁUSULA DÉCIMA PRIMEIRA'.\n"
+            "  ERRADO: Pular números (ex: ir de Décima direto para Décima Segunda).\n"
+            "  CORRETO: 'CLÁUSULA DÉCIMA PRIMEIRA: O exercício social terá início em 1º de janeiro...'\n"
             "  ERRADO: 'Revisar a cláusula para incluir...'\n"
             "  ERRADO: 'Incluir uma cláusula específica definindo...'\n"
             "- executive_summary: Parecer em 3 parágrafos (Introdução, Problemas, Conclusão). Use \\n\\n entre eles.\n"
@@ -247,6 +264,14 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
         valid_cats = ["DREI", "CNAE", "Capital", "Governança", "Ortografia", "Inconsistência"]
         cat = raw.category if raw.category in valid_cats else "DREI"
 
+        # Converte spelling_corrections do schema LLM para o schema final
+        final_spelling_corrections = None
+        if cat == "Ortografia" and raw.spelling_corrections:
+            final_spelling_corrections = [
+                SpellingCorrection(wrong=sc.wrong, correct=sc.correct)
+                for sc in raw.spelling_corrections
+            ]
+
         issue = Issue(
             id=f"issue_{len(final_issues) + 1}",
             title=raw.title,
@@ -256,7 +281,8 @@ def classify_issues_node(state: WorkflowState) -> WorkflowState:
             bounding_box=bbox_data,
             category=cat,
             suggested_fix=raw.suggested_fix,
-            is_omission=raw.is_omission
+            is_omission=raw.is_omission,
+            spelling_corrections=final_spelling_corrections
         )
         final_issues.append(issue)
     
